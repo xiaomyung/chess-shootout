@@ -237,7 +237,9 @@ a deterministic UUID4 client-side so the server's validator accepts it. Real
 clients auto-generate and persist a UUID4 on first launch.
 
 In both clients pick **Online**, choose the **same time control**, then hit
-**FIND MATCH** — both see "Match found!" and the game begins.
+**FIND MATCH** — both see "Match found!" and the game begins. Online games are
+always timed: the ∞ chamber is locked on the time picker while Online is
+selected.
 
 ### Settings (`.env`)
 
@@ -295,6 +297,8 @@ unversioned client is always admitted.
 
 - **Resign** — opponent wins.
 - **Draw** (on your turn) — opponent gets Accept/Decline; mutual offers auto-agree.
+- Before both players have made a move, a resignation or an agreed draw is an
+  **abort** instead — no winner, no series point.
 - **Undo / takeback** — only right after your own move, while the opponent is
   on the clock; on accept, one ply rolls back and the clocks restore.
 - **Give 15 sec** — tops up the opponent's clock; **tap** for +15 s or **hold**
@@ -303,15 +307,20 @@ unversioned client is always admitted.
   the grant.
 - **Rematch** (from the result modal) — the same room restarts with swapped
   colors; the series score follows the players, not the colors. The window stays
-  open while an opponent reconnects; once it closes the card offers **New
-  Search** instead.
+  open while an opponent reconnects; once it closes — or once you decline — the
+  card offers **New Search** instead, which searches with whatever the Play
+  panel currently shows. A new pairing always starts the series at 0–0, even
+  against the same opponent.
 
 ### Idle timeouts
 
 Online openings can't be left hanging: until the game is properly under way,
-whoever is on the move has **60 seconds** to play it.
+whoever is on the move has a short window to play it. The abort window is
+**60 seconds or half the starting clock, whichever is shorter** (30 s in a 1+0
+game), so it always runs out before the clock could; the resign window is
+**60 seconds** at every time control.
 
-| Moves played | On the move | Nobody moves for 60 s |
+| Moves played | On the move | Nobody moves in the window |
 |---|---|---|
 | None yet | White | Game **aborts** — no winner |
 | White's first, no reply | Black | Game **aborts** — no winner |
@@ -320,8 +329,11 @@ whoever is on the move has **60 seconds** to play it.
 Once White's second move lands the game is under way and the chess clock is the
 only deadline left. Both players watch the same countdown on the idle player's
 strip — `Abort in …` or `Resign in …` — and it keeps ticking while that player
-is disconnected, so dropping out buys no extra time. An abort has no winner, no
-series point, and no saved PGN when it lands before a single move; an
+is disconnected, so dropping out buys no extra time. The `Resign in …` badge
+shows the lower of the window and the idle player's clock, so it never promises
+time the clock will not give. Any game that ends before both players have moved
+— idle, resigned, drawn by agreement, flagged or left — is an abort: no winner,
+no series point, and no saved PGN when it lands before a single move. An
 auto-resign is an ordinary resignation, series point and all.
 
 ### Reconnection
@@ -347,12 +359,16 @@ Layered recovery:
   if the room is still alive, a **Reconnect** button appears in the start menu.
 - **Server restart** — when `/resume` fails but `/healthz` is reachable, the
   client shows **"Server restarted — game ended"** with New Search / Cancel;
-  New Search re-matches against your previous time control directly.
+  New Search searches again with the Play panel's current choice.
 
-If a countdown ends with no reconnect, the game **aborts** (no winner) when a
-desync was left unresolved, or the waiting player **wins by abandonment** when
-the other side simply left; starting a new game while still in one forfeits the
-old immediately. A drop pauses nothing else, either: the opening's
+If a countdown ends with no reconnect, the waiting player **wins by
+abandonment** (an **abort**, with no winner, if both players had not yet moved).
+Starting a new search while still in a game ends
+the old one at once: it aborts if both players had not yet moved, and is
+forfeited otherwise. If the start menu is offering **Reconnect**, FIND MATCH asks
+first (**Abandon your duel?**) before giving that game up. Reconnecting restores
+the game's mode and time control on the Play panel but keeps your own side
+choice and nickname. A drop pauses nothing else, either: the opening's
 [idle timeouts](#idle-timeouts) keep counting down while you are away, so a
 reconnect that lands after the window can find the game already over. Rooms are
 in-memory only (no DB), so a true server crash loses game state — but New Search

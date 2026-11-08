@@ -18,7 +18,9 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from chessshootout.domain.match import BOT, ONLINE, SINGLE_SCREEN
 from chessshootout.frontend.menu import play_view as play_view_mod
+from chessshootout.frontend.menu.time_picker import CHAMBERS, ONLINE_DEFAULT_TIME_MINUTES
 from chessshootout.frontend.menu.play_view import (
     COMING_SOON, CTA_BOTTOM, POPOVER_CLOSE_MS, POPOVER_OPEN_MS, RECON_GAP, SIDE_OPTIONS,
     SUMMARY_CHIP_ICON, PlayView)
@@ -672,3 +674,184 @@ def test_side_tile_art_reuses_the_cached_scaled_pawn(monkeypatch, app, hero):
     for _ in range(5):
         hero.draw(window, app.menu._menu_layout)
     assert calls == [], "the open side popover reuses cached scaled tile pawns"
+
+
+# --- #99 side-change bugs: what a resume may and may not touch on the panel
+
+def _resume(**overrides):
+    payload = {"your_color": "black", "time_minutes": 3, "increment_seconds": 2,
+               "white_name": "alice", "black_name": "bob"}
+    payload.update(overrides)
+    return payload
+
+
+def test_apply_resume_config_sets_mode_and_time_but_not_side(hero):
+    hero.selected_side = "random"
+    hero.apply_resume_config(_resume(your_color="black", time_minutes=3, increment_seconds=2))
+    assert hero.selected_mode == ONLINE
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (3, 2)
+    assert hero.selected_side == "random", "the resumed colour is not a preference"
+
+
+@pytest.mark.parametrize("minutes, increment", [
+    pytest.param(7, 2, id="minutes_off_the_drum"),
+    pytest.param(3, 7, id="increment_off_the_turret"),
+    pytest.param("3", 2, id="minutes_as_text"),
+    pytest.param(3, "2", id="increment_as_text"),
+    pytest.param(True, 0, id="bool_is_not_one_minute"),
+    pytest.param(3.0, 2, id="float_minutes"),
+    pytest.param(None, 0, id="untimed_has_no_place_online"),
+    pytest.param(3, None, id="missing_increment"),
+])
+def test_apply_resume_config_ignores_a_time_control_the_picker_cannot_show(
+        hero, minutes, increment):
+    hero.selected_time_minutes, hero.selected_increment_seconds = 10, 5
+    hero.apply_resume_config(_resume(time_minutes=minutes, increment_seconds=increment))
+    assert hero.selected_mode == ONLINE
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (10, 5)
+
+
+def test_apply_resume_config_onto_an_untimed_panel_lands_on_a_timed_chamber(hero):
+    hero.selected_time_minutes, hero.selected_increment_seconds = None, 0
+    hero.apply_resume_config(_resume(time_minutes=7, increment_seconds=2))
+    assert hero.selected_mode == ONLINE
+    assert hero.selected_time_minutes == ONLINE_DEFAULT_TIME_MINUTES
+
+
+@pytest.mark.parametrize("mode", [SINGLE_SCREEN, BOT, ONLINE])
+def test_online_search_config_forces_online_mode(app, hero, mode):
+    """The live read New Search starts from always asks for an online game and
+    otherwise carries the panel's choice; the minutes are always a timed
+    chamber (an untimed drum is replaced by the online default, pinned in the
+    next test), so a timed panel is compared key for key."""
+    hero.selected_mode = mode
+    hero.selected_side = "black"
+    hero.selected_time_minutes, hero.selected_increment_seconds = 3, 2
+
+    config = app.menu.online_search_config()
+
+    assert config["mode"] == ONLINE
+    expected = dict(hero.build_config())
+    assert expected["mode"] == mode, "the panel itself is left on its own mode"
+    expected["mode"] = ONLINE
+    assert config == expected
+
+
+def test_online_search_config_reads_the_panel_live(app, hero):
+    """No snapshot: a side or time control changed after an earlier read shows
+    up in the next one."""
+    first = app.menu.online_search_config()
+    hero.selected_side = "black"
+    hero.selected_time_minutes = 3
+    hero.selected_increment_seconds = 2
+    second = app.menu.online_search_config()
+    assert second["side"] == "black"
+    assert second["time_minutes"] == 3
+    assert second["increment_seconds"] == 2
+    assert first is not second
+
+
+def test_online_search_config_returns_a_fresh_dict_each_time(app):
+    config = app.menu.online_search_config()
+    config["side"] = "tampered"
+    assert app.menu.online_search_config()["side"] != "tampered"
+
+
+def test_online_search_config_never_asks_for_an_untimed_game(app, hero):
+    hero.selected_mode = SINGLE_SCREEN
+    hero.selected_time_minutes, hero.selected_increment_seconds = None, 0
+
+    config = app.menu.online_search_config()
+
+    assert config["time_minutes"] == ONLINE_DEFAULT_TIME_MINUTES
+    assert config["increment_seconds"] == 0
+    assert hero.build_config()["time_minutes"] is None, "the local panel keeps its untimed choice"
+
+
+def test_apply_default_time_settings_skips_an_unchanged_default(hero):
+    """Leaving Options re-applies the defaults; unchanged, they must not wipe a
+    time control picked on the panel since."""
+    hero.selected_time_minutes, hero.selected_increment_seconds = 1, 0
+    hero.apply_default_time_settings()
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (1, 0)
+
+
+def test_apply_default_time_settings_applies_a_changed_default_once(monkeypatch, hero):
+    hero.selected_time_minutes, hero.selected_increment_seconds = 1, 0
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
+    monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
+    hero.apply_default_time_settings()
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (15, 10)
+    hero.selected_time_minutes, hero.selected_increment_seconds = 3, 2
+    hero.apply_default_time_settings()
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (3, 2), \
+        "the same default a second time is a no-op"
+
+
+# --- the untimed chamber has no place online
+
+def test_switching_the_chip_to_online_moves_an_untimed_drum_onto_a_timed_chamber(app, hero):
+    hero.selected_mode = SINGLE_SCREEN
+    hero.selected_time_minutes, hero.selected_increment_seconds = None, 0
+
+    app.menu.handle_click(hero._mode_rects["online"].center)
+
+    assert hero.selected_mode == ONLINE
+    assert hero.selected_time_minutes == ONLINE_DEFAULT_TIME_MINUTES
+    assert hero.build_config()["time_minutes"] == ONLINE_DEFAULT_TIME_MINUTES
+
+
+def test_switching_the_chip_to_online_keeps_a_timed_choice(app, hero):
+    hero.selected_mode = SINGLE_SCREEN
+    hero.selected_time_minutes, hero.selected_increment_seconds = 3, 2
+    app.menu.handle_click(hero._mode_rects["online"].center)
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (3, 2)
+
+
+def test_switching_back_to_local_leaves_the_time_alone(app, hero):
+    hero.selected_mode = ONLINE
+    hero.selected_time_minutes, hero.selected_increment_seconds = 3, 2
+    app.menu.handle_click(hero._mode_rects["single_screen"].center)
+    assert hero.selected_mode == SINGLE_SCREEN
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (3, 2)
+
+
+def test_an_untimed_default_is_timed_when_the_panel_opens_online(monkeypatch, app):
+    _clean(monkeypatch)
+    monkeypatch.setenv("CHESS_LAST_MODE", "online")
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "∞")
+    view = PlayView(app)
+    assert view.selected_mode == ONLINE
+    assert view.selected_time_minutes == ONLINE_DEFAULT_TIME_MINUTES
+    assert view.selected_increment_seconds == 0
+
+
+def test_build_config_online_never_sends_untimed(hero):
+    hero.selected_mode = ONLINE
+    hero.selected_time_minutes = None
+    assert hero.build_config()["time_minutes"] == ONLINE_DEFAULT_TIME_MINUTES
+
+
+def test_the_online_time_popover_locks_the_untimed_chamber(app, hero):
+    hero.selected_mode = ONLINE
+    hero.selected_time_minutes, hero.selected_increment_seconds = 10, 5
+    app.menu.handle_click(hero._time_chip.center)
+    picker = hero._picker
+    untimed = next(i for i, (minutes, _) in enumerate(CHAMBERS) if minutes is None)
+
+    assert picker.handle_click(picker.chamber_center(untimed)) is True
+    assert hero.selected_time_minutes == 10
+    assert picker.selected_minutes == 10
+
+
+def test_the_local_time_popover_still_offers_the_untimed_chamber(app, hero):
+    hero.selected_mode = SINGLE_SCREEN
+    hero.selected_time_minutes, hero.selected_increment_seconds = 10, 5
+    app.menu.handle_click(hero._time_chip.center)
+    picker = hero._picker
+    untimed = next(i for i, (minutes, _) in enumerate(CHAMBERS) if minutes is None)
+
+    picker.handle_click(picker.chamber_center(untimed))
+
+    assert hero.selected_time_minutes is None
+    assert hero.selected_increment_seconds == 0

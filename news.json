@@ -1,5 +1,10 @@
 [
   {
+    "title": "v2.13.2 — Loose Ends",
+    "body": "Fixes for the edges of an online game:\n- Minimizing the window no longer crashes the game\n- Fast games abort sooner when nobody moves — the abort window now scales with the clock, 30 seconds in a 1+0 game\n- A game that ends before both players have moved — resigned, drawn or left — is called off and no longer counts toward the rematch score\n- New Search works after a Reconnect and after declining a rematch, and searches with whatever the Play panel shows\n- Reconnecting keeps your own side choice and nickname, and leaving Options keeps the time you picked\n- FIND MATCH now asks before a new search gives up an unfinished game you could still reconnect to\n- Online games are always timed — the untimed chamber is locked while Online is picked",
+    "date": "2026-11-08"
+  },
+  {
     "title": "v2.13.1 — Clean Recapture",
     "body": "Online fixes from the first two-client games:\n- Recaptures no longer trigger a false Resyncing… — a trade like Nxe5 Nxe5 was being mistaken for a repeat of the previous move on both boards\n- The abort countdown now shows after the first move too, not only before it\n- A declined or expired rematch keeps you on the result card with a New Search button, instead of quietly turning it into a local game\n- The rematch window now waits out an opponent's disconnect instead of closing on it\n- A batch of smaller fixes underneath: a rematch accepted while the other player was reconnecting, reconnecting into a finished game, series scores when both players share a nickname, and a few ways a board could stall",
     "date": "2026-09-12"

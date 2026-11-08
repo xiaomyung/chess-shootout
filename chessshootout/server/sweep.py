@@ -215,17 +215,17 @@ class Sweep:
         Tick every running clock, end the games that have just run out of
         time, and only then look at the idle countdowns. Flag-fall is settled
         first on purpose, so a clock running out in the same tick as an idle
-        window wins and the game ends on time rather than on silence. A board
-        with no plies on it -- a game taken all the way back -- is never
-        charged: the abort window governs an empty board, not the clock
+        window wins and the game ends on time rather than on silence. Only a
+        room whose clock runs is charged: a fresh pairing is left to the abort
+        window, while a board taken all the way back keeps charging the side
+        to move from the moment of the takeback
         """
         for room in self.rooms.active_rooms():
             try:
                 if room.result is not None:
                     continue
-                backend = room.backend
-                if (backend is not None and backend.clock is not None
-                        and room.first_move_at is not None and backend.move_history):
+                backend = room.running_backend()
+                if backend is not None:
                     backend.tick_clock()
                     game_result = backend.game_result()
                     if game_result in RESULT_REASON_BY_GAME_RESULT:

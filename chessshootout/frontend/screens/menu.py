@@ -119,16 +119,27 @@ class MenuScreen(Screen):
         """
         self.play_view.apply_default_time_settings()
 
+    def online_search_config(self) -> dict[str, Any]:
+        """
+        Read the Play panel's current choices as an online search request, the
+        block the coordinator's New Search starts from. It is read live each
+        time, so the side and time control are whatever the panel shows now,
+        and the mode is always online even if the player flipped the mode chip
+
+        :returns: the Play panel's settings block with the mode set to online
+            and a timed clock
+        """
+        return cast("dict[str, Any]", self.play_view.build_online_config())
+
     def apply_resume_config(self, resume: dict[str, Any]) -> None:
         """
-        Dress the Play panel to match the game being rejoined -- online, the
-        same time control, the same side -- and restore the nickname that game
-        was played under, so a rematch from here carries on as the same player
+        Dress the Play panel to match the game being rejoined -- online, at
+        that game's time control -- so the menu behind the reconnect tells the
+        truth about what the player is going back to. The side preference and
+        the stored nickname are the player's own and are left alone
 
         :param resume: the server's summary of the game waiting to be resumed
         """
-        color = resume["your_color"]
-        env.set_nickname(resume["white_name"] if color == "white" else resume["black_name"])
         self.play_view.apply_resume_config(resume)
 
     def enter(self, **payload: Any) -> None:

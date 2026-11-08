@@ -10,7 +10,8 @@ published identifier that clients and generators key on.
 Descriptions are deliberately NOT pinned verbatim: they are handler docstrings
 and get reworded as the endpoints gain fields. What IS pinned is that each one
 exists and stays public copy -- no internal vocabulary (`guard`, `quarantine`,
-`sweep`, `app.state`) leaking into the document a stranger can curl.
+`sweep`, `app.state`, `finalize`, `plies`, `first_move`, `unstarted`) leaking into
+the document a stranger can curl.
 """
 import pytest
 
@@ -25,7 +26,8 @@ ROUTES = [
     ("post", "/reclaim", "post_reclaim_reclaim_post"),
 ]
 
-INTERNAL_WORDS = ("guard", "quarantine", "sweep", "app.state")
+INTERNAL_WORDS = ("guard", "quarantine", "sweep", "app.state", "finalize", "plies",
+                  "first_move", "unstarted")
 
 
 @pytest.fixture
@@ -65,3 +67,12 @@ def test_every_route_description_is_public_copy(spec, method, path, operation_id
     lowered = description.lower()
     leaked = [word for word in INTERNAL_WORDS if word in lowered]
     assert leaked == [], f"{method.upper()} {path} description leaks internals: {leaked}"
+
+
+@pytest.mark.parametrize("method", ["post", "delete"])
+def test_both_matchmake_routes_publish_the_no_winner_call_off(spec, method):
+    """Searching again, or cancelling, from a game nobody has moved in calls that
+    game off rather than refusing or forfeiting it -- a behaviour a client
+    author needs to know, so it is part of the published description."""
+    description = spec["paths"]["/matchmake"][method]["description"].lower()
+    assert "called off with no winner" in description

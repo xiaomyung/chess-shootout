@@ -1,15 +1,17 @@
 import logging
-import os
 from typing import Any, cast
 
 import pygame as pg
 
 from chessshootout.frontend.modal_registry import ModalSpec, dismiss_topmost
 from chessshootout.frontend.screens.base import Nav
-from chessshootout.frontend.window_chrome import MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT
 
 
 log = logging.getLogger("chess.frontend")
+
+WINDOW_WAKE_EVENTS = frozenset({
+    pg.WINDOWRESTORED, pg.WINDOWSHOWN, pg.WINDOWEXPOSED, pg.WINDOWFOCUSGAINED,
+})
 
 
 class InputRouter:
@@ -307,12 +309,10 @@ class InputRouter:
                     scrollable.handle_scroll(pg.mouse.get_pos(), event.y)
 
             elif event.type == pg.VIDEORESIZE:
-                w = max(event.w, MIN_WINDOW_WIDTH)
-                h = max(event.h, MIN_WINDOW_HEIGHT)
-                if os.name == "nt" or (w, h) != (event.w, event.h):
-                    frontend._recreate_window_surface(w, h)
-                frontend.screen.on_resize()
-                frontend._finish_resize(w, h)
+                frontend._on_videoresize(event.w, event.h)
+
+            elif event.type in WINDOW_WAKE_EVENTS:
+                frontend._on_window_wake()
         if dropped:
             log.debug("dropped %d stale events pending nav %s",
                       dropped, frontend._pending_nav.name)

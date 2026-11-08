@@ -13,7 +13,7 @@ from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, IDLE_WINDOW_BY_PLIES, IdleWindowSpec,
-    RESYNC_STRIKE_TTL_SECONDS, Reason,
+    RESYNC_STRIKE_TTL_SECONDS, Reason, idle_window_seconds,
 )
 from chessshootout.skillcheck import online
 from chessshootout.skillcheck.types import SkillCheckKind, SkillCheckOutcome
@@ -353,7 +353,8 @@ class Room:
         Read a side's running score in this room's series, the number shown
         beside the names. Scores are keyed by the player's own id, so they
         survive the colour swap a rematch performs and two opponents who happen
-        to share a nickname still keep separate scores
+        to share a nickname still keep separate scores. A series lasts only as
+        long as its room: a new pairing always opens a fresh room at 0-0
 
         :param color: white or black.
         :returns: that side's series score, 0.0 while the seat is empty.
@@ -427,16 +428,43 @@ class Room:
         """
         Look up the idle rule in force at this point of the game: silence
         before the first moves aborts the game, silence on the ply after that
-        resigns it, and from then on no idle window arms at all
+        resigns it, and from then on no idle window arms at all. The length is
+        fitted to this room's time control, so a bullet game's abort window is
+        shorter than its clock and always fires before a flag could
 
-        :returns: the rule for the current ply count, None when none arms.
+        :returns: the rule for the current ply count with its length in seconds
+            for this room, None when none arms.
         """
-        return IDLE_WINDOW_BY_PLIES.get(self.plies_ever)
+        spec = IDLE_WINDOW_BY_PLIES.get(self.plies_ever)
+        if spec is None:
+            return None
+        return IdleWindowSpec(
+            spec.outcome, idle_window_seconds(spec.outcome, self.time_minutes * 60.0))
+
+    def running_backend(self) -> Backend | None:
+        """
+        Hand over the board whose side to move is being charged for their time
+        right now, for the sweep and a resume to tick. The clock runs from the
+        first move on, a board taken all the way back included: a takeback
+        restarts the countdown from the moment of the rewind, so the side put
+        back on move is charged only from then, and before both sides have
+        moved the abort window still settles the game with no winner. A flag
+        that has already fallen still counts as running, so the game it ends
+        is settled rather than left hanging
+
+        :returns: the backend to tick, or None before the first move and for a
+            board without a clock.
+        """
+        backend = self.backend
+        if self.first_move_at is None or backend is None or backend.clock is None:
+            return None
+        return backend
 
     def idle_remaining(self, now: float) -> float | None:
         """
-        How much longer the side to move may stay silent, the countdown that
-        is pushed to both clients. Zero means the window is up
+        How much longer the side to move may stay silent before the window
+        ends the game, the figure the sweep judges by. Zero means the window
+        is up
 
         :param now: monotonic seconds, the server's own clock.
         :returns: seconds left, or None when no window is running.
@@ -445,6 +473,25 @@ class Room:
         if window is None or self.idle_since is None:
             return None
         return max(window.seconds - (now - self.idle_since), 0.0)
+
+    def idle_display_remaining(self, now: float) -> float | None:
+        """
+        How long the countdown shown to both players has left. A resign window
+        can outlast the clock of the side to move, and then the clock is what
+        ends the game, so the shown value is capped at that clock and reaches
+        zero with the flag. The game itself is still ended by the uncapped
+        window, which keeps the flag winning a tie
+
+        :param now: monotonic seconds, the server's own clock.
+        :returns: seconds to show, or None when no window is running.
+        """
+        remaining = self.idle_remaining(now)
+        window = self.idle_window()
+        backend = self.backend
+        if (remaining is None or window is None or window.outcome != Reason.RESIGNATION
+                or backend is None or backend.clock is None):
+            return remaining
+        return min(remaining, backend.clock.remaining_at(backend.current_turn(), now))
 
     def idle_timeout_reason(self, now: float) -> str | None:
         """
@@ -864,7 +911,8 @@ class RoomManager:
         """
         Find the live game a player is in, which matchmaking consults before
         letting them start a second one. A room merely waiting for an
-        opponent, or one already finished, does not count as live
+        opponent, a pairing nobody has moved in yet, or one already finished,
+        does not count as live
 
         :param client_uuid: the player's stable id.
         :returns: the room and their colour, or None when there is no game.
@@ -881,6 +929,47 @@ class RoomManager:
         if color is None:
             return None
         return room, color
+
+    def unstarted_room_for(self, client_uuid: str) -> Room | None:
+        """
+        Find the paired game a player holds that nobody has moved in yet -- a
+        fresh pairing or a rematch just restarted -- which a new search calls
+        off with no winner instead of refusing. It is the exact complement of
+        in_progress_room_for over paired, unfinished rooms, so a player is never
+        found in both
+
+        :param client_uuid: the player's stable id.
+        :returns: the unstarted room, or None when there is none.
+        """
+        room_id = self._uuid_to_room.get(client_uuid)
+        if room_id is None:
+            return None
+        room = self._active.get(room_id)
+        if (room is None or room.result is not None or not room.is_paired()
+                or room.first_move_at is not None):
+            return None
+        return room
+
+    def unstarted_seat_by_token(self, room_id: str,
+                                session_token: str) -> tuple[Room, PlayerSlot] | None:
+        """
+        Find the seat a withdrawing player was given in a game that was paired
+        a moment before their cancel arrived and that nobody has moved in yet.
+        The token has to match a seat in that very room, so knowing a room id
+        alone can never call somebody else's game off
+
+        :param room_id: the room the cancel names.
+        :param session_token: token proving the seat is the caller's.
+        :returns: the room and the caller's seat, or None when the token
+            matches no seat there or the game is not an unstarted pairing.
+        """
+        room = self._active.get(room_id)
+        if room is None:
+            return None
+        _, slot = room.slot_by_token(session_token)
+        if slot is None or self.unstarted_room_for(slot.client_uuid) is not room:
+            return None
+        return room, slot
 
     def queued_room_for(self, client_uuid: str) -> Room | None:
         """
@@ -933,7 +1022,9 @@ class RoomManager:
                         and now - slot.disconnected_at >= GRACE_SECONDS):
                     yield room, color
 
-    ZERO_PLY_ABORT_REASONS = (Reason.TIMEOUT, Reason.ABANDONMENT)
+    PREGAME_ABORT_REASONS = frozenset({
+        Reason.TIMEOUT, Reason.ABANDONMENT, Reason.RESIGNATION, Reason.DRAW_AGREEMENT,
+    })
 
     def finalize_result(self, room_id: str, reason: str,
                         winner_color: str | None = None) -> bool:
@@ -941,20 +1032,22 @@ class RoomManager:
         Write the result onto a room once and for all, settling everything
         that ends along with the game: the series score, any pending check,
         the idle countdown, the shared marks, and both players moving to the
-        result screen. It reports whether this call was the one that applied
-        the result, so a finalise that lost a race stays quiet instead of
-        announcing a second ending
+        result screen. A game that ends before both sides have moved is
+        recorded as an abort with no winner, so it never scores. It reports
+        whether this call was the one that applied the result, so a finalise
+        that lost a race stays quiet instead of announcing a second ending
 
         :param room_id: the room to finalise.
-        :param reason: why the game ended, from the shared reason codes; a
-            timeout or abandonment with no ply played is recorded as an abort.
+        :param reason: why the game ended, from the shared reason codes; a flag,
+            a walk-away, a resignation or an agreed draw before both sides have
+            moved is recorded as an abort.
         :param winner_color: the winning side, None for a draw or an abort.
         :returns: True when this call is the one that applied the result.
         """
         room = self._active.get(room_id)
         if room is None or room.result is not None:
             return False
-        if room.plies_ever == 0 and reason in self.ZERO_PLY_ABORT_REASONS:
+        if room.plies_ever < 2 and reason in self.PREGAME_ABORT_REASONS:
             reason, winner_color = Reason.ABORTED, None
         room.result = (reason, winner_color)
         room.ended_at = self._now()
@@ -1050,6 +1143,17 @@ class RoomManager:
         if room is None or room.result is None:
             return None
         return room
+
+    def is_live(self, room: Room) -> bool:
+        """
+        Tell whether a room the caller is holding is still the one the server
+        knows by that id, queued or playing. A handler that held a room across
+        an await uses this to notice the room was dropped meanwhile
+
+        :param room: the room object the caller holds.
+        :returns: True while that very room is still registered.
+        """
+        return self.get(room.room_id) is room
 
     def drop_room_now(self, room_id: str) -> None:
         """

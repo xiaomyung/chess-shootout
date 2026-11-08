@@ -25,6 +25,7 @@ from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.screens.game import IdleWindow
 from chessshootout.server.protocol import Reason
+from chessshootout.frontend.window_chrome import WINDOW_FLAGS
 from tests.helpers import key_event, make_app
 
 
@@ -283,6 +284,131 @@ def test_videoresize_mid_review_animation_does_not_crash(tmp_path):
     assert app.review.board.rect.width > 0
 
 
+# --- minimize / restore mid-anything (Deck #96) ---------------------------------
+
+ICONIC_SIZE = (160, 31)
+
+
+class _SdlWindow:
+    """Monkeypatched SDL view of the window. The dummy driver always reports an
+    active window, so minimize has to be faked through get_active."""
+
+    def __init__(self, monkeypatch, app):
+        self.active = True
+        self.size = app.window.get_size()
+        monkeypatch.setattr(pg.display, "get_active", lambda: self.active)
+        monkeypatch.setattr(pg.display, "get_window_size", lambda: self.size)
+        monkeypatch.setattr(app.pacer, "wait", lambda: None)
+        monkeypatch.setattr(app._idle_pacer, "wait", lambda: None)
+
+
+def _minimize(app, sdl):
+    restore_size = app.window.get_size()
+    sdl.active = False
+    sdl.size = ICONIC_SIZE
+    app.window = pg.display.set_mode(ICONIC_SIZE, WINDOW_FLAGS)
+    app.chrome.window = app.window
+    pg.event.clear()
+    pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": ICONIC_SIZE[0], "h": ICONIC_SIZE[1]}))
+    app._run_frame()
+    app._run_frame()
+    return restore_size
+
+
+def _restore(app, sdl, size):
+    sdl.active = True
+    sdl.size = size
+    pg.event.post(pg.event.Event(pg.VIDEORESIZE, {"w": size[0], "h": size[1]}))
+    app._run_frame()
+
+
+def _assert_layout_sane(app):
+    for screen in (app.game, app.review):
+        for rect in (screen.board.rect, screen.right_menu.outer_rect,
+                     screen.right_menu.moves_rect):
+            assert rect.width > 0 and rect.height > 0, rect
+
+
+@pytest.mark.parametrize("name", ["menu", "game", "review"])
+def test_minimize_restore_while_screen_active_never_breaks_layout(
+        name, tmp_path, monkeypatch):
+    app = make_app()
+    app.switch_to(name, **_entry_payload(name, tmp_path))
+    sdl = _SdlWindow(monkeypatch, app)
+
+    size = _minimize(app, sdl)
+    _assert_layout_sane(app)
+    app.draw_frame()
+
+    _restore(app, sdl, size)
+    assert app.window.get_size() == size
+    assert (app.window_width, app.window_height) == size
+    assert app._last_layout_size == size
+    _assert_layout_sane(app)
+    app.draw_frame()
+
+
+def test_minimize_mid_focus_transition_aborts_it_and_restores_cleanly(monkeypatch):
+    app = make_app()
+    app.switch_to("game")
+    app.game._toggle_focus(True)
+    assert app.game.focus_transition is not None
+    sdl = _SdlWindow(monkeypatch, app)
+
+    size = _minimize(app, sdl)
+    assert app.game.focus_transition is None
+    _restore(app, sdl, size)
+
+    assert app.game.focus_transition is None
+    _assert_layout_sane(app)
+    app.draw_frame()
+
+
+def test_minimize_mid_board_drag_then_restore_does_not_crash(monkeypatch):
+    app = make_app()
+    app.switch_to("game")
+    _start_board_drag(app.game.board, Square(6, 4))
+    sdl = _SdlWindow(monkeypatch, app)
+
+    size = _minimize(app, sdl)
+    _restore(app, sdl, size)
+
+    _assert_layout_sane(app)
+    app.draw_frame()
+
+
+def test_minimize_mid_review_animation_then_restore_does_not_crash(tmp_path, monkeypatch):
+    app = make_app()
+    app.switch_to("review", pgn_path=str(_write_pgn(tmp_path)), return_to="menu")
+    app.review.handle_key(key_event(pg.K_RIGHT))
+    assert app.review.board.is_animating()
+    sdl = _SdlWindow(monkeypatch, app)
+
+    size = _minimize(app, sdl)
+    _restore(app, sdl, size)
+
+    _assert_layout_sane(app)
+    app.draw_frame()
+
+
+def test_help_card_measured_while_minimized_is_remeasured_on_restore(monkeypatch):
+    """The help card reads the live surface size, so the minimize relayout pins
+    it to the iconic surface's corner; only the restore relayout puts it back,
+    which is why the restore edge must relayout even at an unchanged size."""
+    app = make_app()
+    app.switch_to("game")
+    sdl = _SdlWindow(monkeypatch, app)
+    app.help_modal.show([])
+    reference = app.help_modal.rect.copy()
+
+    size = _minimize(app, sdl)
+    assert app.help_modal.rect.topleft == (8, 8)
+    _restore(app, sdl, size)
+
+    assert app.help_modal.rect == reference
+    app.draw_frame()
+
+
 # --- a screen's own modals must not outlive it ---------------------------------
 
 def test_help_left_open_on_the_game_screen_does_not_re_arm_on_the_next_game():
@@ -399,4 +525,18 @@ def test_videoresize_while_a_menu_subview_is_active_recomputes_without_crash(vie
     app.input_router.check_events()
 
     assert (app.window_width, app.window_height) == (w + 80, h + 40)
+    app.draw_frame()
+
+
+@pytest.mark.parametrize("view", MENU_VIEWS)
+def test_minimize_restore_while_a_menu_subview_is_active_draws_cleanly(view, monkeypatch):
+    app = make_app()
+    app.menu.goto_view(view)
+    sdl = _SdlWindow(monkeypatch, app)
+
+    size = _minimize(app, sdl)
+    app.draw_frame()
+    _restore(app, sdl, size)
+
+    assert app._last_layout_size == size
     app.draw_frame()

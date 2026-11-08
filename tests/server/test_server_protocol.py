@@ -19,6 +19,7 @@ from chessshootout.server.protocol import (
     ResumeResponse, ResyncDirectiveMessage, SkillCheckRequiredMessage,
     SkillCheckResultMessage, SkillCheckOutcomeWire, SkillCheckShotMessage,
     SkillCheckSpectateMessage, SkillCheckSpectateShotMessage, client_version_outdated,
+    ABORT_WINDOW_TC_FRACTION, idle_window_seconds,
     normalize_country, normalize_nickname, parse_client_version,
 )
 from tests.helpers import fake_uuid4
@@ -1151,3 +1152,63 @@ def test_health_response_defaults_describe_a_healthy_just_started_server():
     assert body.queue_depth == 0
     assert body.uptime_s == 0.0
     assert "max_rooms" not in body.model_dump(), "the room cap is not published"
+
+
+@pytest.mark.parametrize(
+    "initial_seconds, expected",
+    [
+        pytest.param(30.0, 15.0, id="half_minute_tc_gives_15"),
+        pytest.param(60.0, 30.0, id="one_minute_tc_gives_30"),
+        pytest.param(90.0, 45.0, id="ninety_seconds_gives_45"),
+        pytest.param(120.0, 60.0, id="two_minutes_meets_the_cap_exactly"),
+        pytest.param(180.0, 60.0, id="three_minutes_capped_at_60"),
+        pytest.param(300.0, 60.0, id="five_minute_tc_gives_60"),
+        pytest.param(10800.0, 60.0, id="three_hours_capped_at_60"),
+        pytest.param(0.0, 60.0, id="untimed_zero_keeps_the_table"),
+        pytest.param(-5.0, 60.0, id="negative_keeps_the_table"),
+        pytest.param(float("nan"), 60.0, id="nan_keeps_the_table"),
+        pytest.param(float("inf"), 60.0, id="inf_keeps_the_table"),
+        pytest.param(float("-inf"), 60.0, id="minus_inf_keeps_the_table"),
+    ],
+)
+def test_the_abort_window_is_capped_at_half_the_starting_clock(initial_seconds, expected):
+    """User rule: abort window = min(60 s, half the starting clock). A
+    non-positive or non-finite clock means untimed and must never produce a 0 s
+    (or NaN) abort, so it falls back to the table length."""
+    assert FIRST_MOVE_ABORT_SECONDS == 60
+    assert ABORT_WINDOW_TC_FRACTION == 0.5
+    assert idle_window_seconds(Reason.ABORTED, initial_seconds) == expected
+
+
+@pytest.mark.parametrize(
+    "initial_seconds",
+    [0.0, 15.0, 30.0, 60.0, 300.0, 10800.0, float("nan"), float("inf")],
+)
+def test_the_resign_window_ignores_the_time_control(initial_seconds):
+    """Only the abort window shrinks; the ply-2 resign window keeps its table
+    length at any time control (its displayed countdown is capped elsewhere)."""
+    assert idle_window_seconds(Reason.RESIGNATION, initial_seconds) == IDLE_RESIGN_SECONDS
+
+
+def test_idle_window_seconds_returns_a_float_for_every_table_outcome():
+    for outcome, seconds in IDLE_SECONDS_BY_OUTCOME.items():
+        result = idle_window_seconds(outcome, 300.0)
+        assert isinstance(result, float)
+        assert result == float(seconds)
+
+
+def test_idle_window_seconds_rejects_an_outcome_outside_the_table():
+    with pytest.raises(KeyError):
+        idle_window_seconds(Reason.TIMEOUT, 60.0)
+
+
+@pytest.mark.parametrize("minutes", range(MIN_TIME_MINUTES, MAX_TIME_MINUTES + 1))
+def test_the_abort_window_always_ends_before_the_starting_clock_could(minutes):
+    """Property over every time control the server accepts: the abort window is
+    positive and strictly shorter than the starting clock, so a silent first
+    mover is aborted before their flag can fall -- the 1+0 'Abort in 60' that
+    the flag always beat cannot come back."""
+    initial = minutes * 60.0
+    window = idle_window_seconds(Reason.ABORTED, initial)
+    assert 0 < window < initial
+    assert window <= FIRST_MOVE_ABORT_SECONDS

@@ -86,9 +86,10 @@ async def finalize_and_broadcast(rooms: RoomManager, connections: ConnectionRegi
 def idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
     """
     Describe the countdown running against the silent side to move: what happens
-    when it reaches zero, whose turn it is and how long is left. A finished game,
-    a game with no window armed at this ply, or one with nobody to move has no
-    countdown at all
+    when it reaches zero, whose turn it is and how long is left. The time left is
+    the shown figure, so a resign window that outlasts the mover's clock reads
+    the clock instead. A finished game, a game with no window armed at this ply,
+    or one with nobody to move has no countdown at all
 
     :param room: room to describe
     :param now: monotonic time in seconds, used for the remaining time
@@ -102,7 +103,7 @@ def idle_window_wire(room: Room, now: float) -> IdleWindowWire | None:
         return None
     return IdleWindowWire(
         outcome=window.outcome, color=color,
-        seconds_remaining=room.idle_remaining(now))
+        seconds_remaining=room.idle_display_remaining(now))
 
 
 async def push_idle_window(rooms: RoomManager, connections: ConnectionRegistry,

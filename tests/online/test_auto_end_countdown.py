@@ -503,3 +503,33 @@ def test_heartbeat_folds_the_resign_window_total(monkeypatch):
     args, _ = app.sound_manager.update_heartbeat.call_args
     fraction, _paused = args
     assert fraction == pytest.approx(30.0 / IDLE_RESIGN_SECONDS, abs=0.01)
+
+
+@pytest.mark.parametrize("minutes, remaining, total, expected_secs", [
+    (1, 60.0, 30.0, 30.0),
+    (5, 60.0, 60.0, 60.0),
+])
+def test_abort_push_total_follows_the_room_time_control(
+        monkeypatch, minutes, remaining, total, expected_secs):
+    """The abort window is capped per room (1+0 aborts at 30 s), so the badge
+    total and the clamp use the room's own length, not the 60 s table value."""
+    app = _online_app()
+    ticks = _ticks(monkeypatch)
+    app.game._time_control = (minutes * 60, 0)
+    app.game.on_idle_window({
+        "outcome": "aborted", "color": "white", "seconds_remaining": remaining,
+    })
+    window = app.game._idle_window
+    assert window.total_seconds == total
+    assert window.deadline_ms == ticks["now"] + int(expected_secs * 1000)
+
+
+def test_idle_window_without_a_time_control_falls_back_to_the_table(monkeypatch):
+    """No known time control (untimed or not yet adopted): the table length."""
+    app = _online_app()
+    _ticks(monkeypatch)
+    app.game._time_control = None
+    app.game.on_idle_window({
+        "outcome": "aborted", "color": "white", "seconds_remaining": 45.0,
+    })
+    assert app.game._idle_window.total_seconds == float(FIRST_MOVE_ABORT_SECONDS)

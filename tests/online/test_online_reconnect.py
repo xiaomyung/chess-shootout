@@ -23,12 +23,16 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
+from tests.helpers import FakeOnlineClient, online_start_payload
 from chessshootout.backend.pieces import PieceColor
+from chessshootout.domain.match import ONLINE
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend.game.variant import Variant
 from chessshootout.frontend.online_coordinator import (
-    APPLY_FAILED_LABEL, RECONNECT_PROBE_MAX_ATTEMPTS, ReconnectAnswer,
+    APPLY_FAILED_LABEL, RECONNECT_PROBE_INTERVAL_MS, RECONNECT_PROBE_MAX_ATTEMPTS,
+    ReconnectAnswer,
 )
+from chessshootout.infra import env
 
 
 _pygame_init = pygame_display(1000, 800)
@@ -610,3 +614,214 @@ def test_probe_worker_does_not_relog_reclaim_available_while_still_pending(
     with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
         app.coordinator._reconnect_probe_worker("addr", "uuid", gen)
     assert not any(r.levelno == logging.INFO for r in caplog.records)
+
+
+# --- #99: New Search after Reconnect, and the side/nickname/TC the resume may touch
+
+def _stub_reconnect(monkeypatch, fresh):
+    """Hand the next Reconnect press a given snapshot without a server: the
+    worker's fetch returns it and the socket never opens."""
+    monkeypatch.setattr(
+        "chessshootout.online.client.OnlineClient.reconnect_to_existing",
+        lambda self, *a, **kw: None,
+    )
+    monkeypatch.setattr("chessshootout.frontend.online_coordinator.fetch_resume",
+                        lambda *a, **kw: fresh)
+
+
+def _pending(app):
+    """Plant a reclaimable game and retire the probe the shell fired at
+    startup, so a late miss from that thread cannot wipe the entry again."""
+    with app.coordinator._pending_reconnect_lock:
+        app.coordinator._reconnect_probe_gen += 1
+        app.coordinator._pending_reconnect = {
+            "addr": "localhost:8000", "room_id": "room-x", "session_token": "tok",
+        }
+
+
+def _no_sockets(monkeypatch):
+    """Keep a real search in this module off the network: the client's
+    connect, cancel and disconnect are neutered, and the server address points
+    at a closed local port in case anything slips past."""
+    monkeypatch.setenv("CHESS_SERVER_ADDR", "127.0.0.1:9")
+    for name in ("connect", "cancel_queue", "disconnect"):
+        monkeypatch.setattr(f"chessshootout.online.client.OnlineClient.{name}",
+                            lambda self, *a, **kw: None)
+
+
+def _start_search(app, config):
+    """Press FIND MATCH and, when a reclaimable game makes the shell ask
+    first, answer that the search should go ahead."""
+    app._on_start_game(config)
+    if app.confirm_modal.is_visible():
+        on_yes = app.confirm_modal.on_yes
+        app.confirm_modal.hide()
+        on_yes()
+
+
+def test_new_search_after_a_reconnected_game_searches_what_the_play_view_shows(
+        app, monkeypatch):
+    """Deck #99: a session rebuilt by Reconnect never searched, so the old
+    'repeat the last search' had nothing to repeat and silently went to the
+    menu. New Search now reads the Play panel: the room's time control, which
+    the resume dressed it with, and the player's own side preference -- not the
+    colour they happened to hold in the room."""
+    _stub_reconnect(monkeypatch, _resume_payload(
+        your_color="black", time_minutes=3, increment_seconds=2))
+    _pending(app)
+    _reconnect_now(app)
+    assert app.screen is app.game
+    app.game.manual_result = "white_wins_by_resignation"
+    searches = []
+    monkeypatch.setattr(app.coordinator, "_begin_online_flow", searches.append)
+
+    app.game.result_menu.callbacks["new_search"]()
+
+    assert len(searches) == 1
+    assert searches[0]["mode"] == ONLINE
+    assert (searches[0]["time_minutes"], searches[0]["increment_seconds"]) == (3, 2)
+    assert searches[0]["side"] == "random"
+    assert app.screen is app.menu
+
+
+def test_reconnect_keeps_the_side_preference(app, monkeypatch):
+    """The side chip is the player's preference for the next search; the
+    colour they hold in the resumed room is not a choice they made."""
+    app.menu.play_view.selected_side = "white"
+    _stub_reconnect(monkeypatch, _resume_payload(
+        your_color="black", time_minutes=5, increment_seconds=2))
+    _pending(app)
+
+    _reconnect_now(app)
+
+    hero = app.menu.play_view
+    assert hero.selected_side == "white"
+    assert hero.selected_mode == ONLINE
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (5, 2)
+
+
+@pytest.mark.parametrize("stored, wire_name", [
+    pytest.param("", "Player", id="nameless_player_never_gets_the_wire_fallback_stored"),
+    pytest.param("alice", "old-alice", id="a_renamed_player_keeps_the_new_name"),
+])
+def test_reconnect_never_rewrites_the_stored_nickname(app, monkeypatch, stored, wire_name):
+    if stored:
+        monkeypatch.setenv("CHESS_NICKNAME", stored)
+    fresh = _resume_payload(your_color="black")
+    fresh["black_name"] = wire_name
+    _stub_reconnect(monkeypatch, fresh)
+    _pending(app)
+
+    _reconnect_now(app)
+
+    assert app.screen is app.game
+    assert env.get_nickname() == stored
+    env_file = env._ENV_PATH
+    assert (not env_file.exists()
+            or "CHESS_NICKNAME" not in env_file.read_text(encoding="utf-8"))
+
+
+def test_reconnect_ignores_a_time_control_the_picker_cannot_show(app, monkeypatch):
+    """The resume payload is untrusted: a value the drum has no chamber for
+    would show on the chip and be resent by New Search, so it is ignored and
+    the panel keeps what it had."""
+    hero = app.menu.play_view
+    hero.selected_time_minutes, hero.selected_increment_seconds = 10, 5
+    _stub_reconnect(monkeypatch, _resume_payload(time_minutes=7, increment_seconds=2))
+    _pending(app)
+
+    _reconnect_now(app)
+
+    assert app.screen is app.game
+    assert hero.selected_mode == ONLINE
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (10, 5)
+
+
+def test_an_off_board_snapshot_keeps_a_side_edited_on_the_menu(app):
+    """A live snapshot adopted off-board (menu inside the rematch window) used
+    to overwrite the side chip with the resumed colour, wiping an edit the
+    player had just made."""
+    app.coordinator.client = FakeOnlineClient()
+    app.game.variant = Variant.LOCAL
+    app.menu.play_view.selected_side = "random"
+
+    app.coordinator._handle_game_resumed(_resume_payload(your_color="white"))
+
+    assert app.screen is app.game
+    assert app.menu.play_view.selected_side == "random"
+    assert app.menu.play_view.selected_mode == ONLINE
+
+
+def test_starting_a_search_retires_the_reconnect_offer(app, monkeypatch, caplog):
+    """/matchmake forfeits the waiting room the moment this player queues
+    again, so the Reconnect offer would point at a dropped room: the search
+    retires it, darkens the banner and says so once."""
+    _no_sockets(monkeypatch)
+    _pending(app)
+    app.menu.set_reconnect_available(True)
+    config = {**app.menu.play_view.build_config(), "mode": ONLINE}
+
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        _start_search(app, config)
+
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+    assert app.coordinator.wait_modal.is_visible()
+    dropped = [r.getMessage() for r in caplog.records
+               if r.getMessage().startswith("reclaim dropped")]
+    assert dropped == ["reclaim dropped: search started"]
+
+
+def test_starting_a_search_with_no_offer_logs_no_drop(app, monkeypatch, caplog):
+    _no_sockets(monkeypatch)
+    config = {**app.menu.play_view.build_config(), "mode": ONLINE}
+
+    with caplog.at_level(logging.INFO, logger="chess.frontend"):
+        _start_search(app, config)
+
+    assert not any(r.getMessage().startswith("reclaim dropped") for r in caplog.records)
+    assert app.coordinator.wait_modal.is_visible()
+
+
+def test_a_new_game_never_shows_the_old_reconnect_offer(app, monkeypatch):
+    """Probe V1: the stale offer used to survive the whole game the search
+    produced, and lit the banner again on the way back to the menu, pointing
+    at a room /matchmake had already forfeited."""
+    _no_sockets(monkeypatch)
+    _pending(app)
+    app.menu.set_reconnect_available(True)
+    _start_search(app, {**app.menu.play_view.build_config(), "mode": ONLINE})
+    spawned = []
+    monkeypatch.setattr(app.coordinator, "_spawn_reconnect_probe", lambda: spawned.append(1))
+
+    app.coordinator._begin_match_found_transition(online_start_payload())
+    app.coordinator._finish_match_found()
+    app.coordinator.update(pg.time.get_ticks())
+    assert app.screen is app.game
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+
+    app.coordinator._tear_down_online_session("test")
+    app.coordinator._last_reconnect_probe_ms = pg.time.get_ticks() - RECONNECT_PROBE_INTERVAL_MS
+    app.coordinator.update(pg.time.get_ticks())
+    assert app.screen is app.menu
+    assert app.coordinator.reconnect_available() is False
+    assert app.menu.play_view.reconnect_available is False
+    assert spawned, "with the stale offer gone the probe asks the server again"
+
+
+def test_the_reclaim_probe_runs_again_after_a_search_is_cancelled(app, monkeypatch):
+    """The probe refuses to run while an offer is pending; a search that left
+    the stale offer in place blocked it for the rest of the run."""
+    _no_sockets(monkeypatch)
+    _pending(app)
+    _start_search(app, {**app.menu.play_view.build_config(), "mode": ONLINE})
+    app.coordinator._on_online_cancel()
+    started = []
+    monkeypatch.setattr("threading.Thread",
+                        lambda *a, **k: started.append(1) or MagicMock())
+    app.coordinator._reconnect_probe_inflight = False
+
+    app.coordinator._spawn_reconnect_probe()
+
+    assert started == [1]

@@ -267,8 +267,8 @@ async def _end_by_flag_fall(app, clock):
     room = await pair_room(rooms, time_minutes=1)
     app.state.connections.add(room.room_id, room.white.client_uuid, RecordingWS())
     app.state.connections.add(room.room_id, room.black.client_uuid, RecordingWS())
-    play_plies(room, 1)
-    room.plies_ever = 1
+    play_plies(room, 2)
+    room.plies_ever = 2
     room.first_move_at = clock()
     clock.advance(70)
     await app.state.sweep.step_clock_and_idle_windows()
@@ -306,6 +306,32 @@ async def _end_by_matchmake_abandon(app, clock):
     return room
 
 
+async def _end_by_matchmake_abort(app, clock):
+    """routes_http: searching again from a pairing nobody has moved in calls it
+    off with no winner."""
+    room, _, _ = await _wired_room(app)
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://obs") as http:
+        r = await http.post("/matchmake", json={
+            "version": PROTOCOL_VERSION, "client_uuid": ALICE, "nickname": "A",
+            "time_minutes": 10, "increment_seconds": 0, "side_preference": "random",
+        })
+    assert r.status_code == 200
+    return room
+
+
+async def _end_by_cancel_abort(app, clock):
+    """routes_http: a cancel that raced the pairing calls the pairing off."""
+    room, _, _ = await _wired_room(app)
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://obs") as http:
+        r = await http.request("DELETE", "/matchmake", json={
+            "version": PROTOCOL_VERSION, "room_id": room.room_id,
+            "session_token": room.white.session_token,
+        })
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    return room
+
 FINALIZE_PATHS = [
     pytest.param(_end_by_checkmate, Reason.CHECKMATE, "black", 4, 0.0,
                  id="handlers_checkmate_after_move"),
@@ -315,7 +341,7 @@ FINALIZE_PATHS = [
                  id="handlers_draw_offer_reciprocated"),
     pytest.param(_end_by_accepted_draw_response, Reason.DRAW_AGREEMENT, "none", 2, 0.0,
                  id="handlers_draw_response_accepted"),
-    pytest.param(_end_by_flag_fall, Reason.TIMEOUT, "white", 1, 70.0,
+    pytest.param(_end_by_flag_fall, Reason.TIMEOUT, "black", 2, 70.0,
                  id="sweep_flag_fall"),
     pytest.param(_end_by_idle_window, Reason.RESIGNATION, "black", 2,
                  IDLE_RESIGN_SECONDS + 1.0, id="sweep_idle_window"),
@@ -323,6 +349,10 @@ FINALIZE_PATHS = [
                  GRACE_SECONDS + 1.0, id="sweep_grace_expired"),
     pytest.param(_end_by_matchmake_abandon, Reason.ABANDONMENT, "black", 2, 0.0,
                  id="app_matchmake_abandons"),
+    pytest.param(_end_by_matchmake_abort, Reason.ABORTED, "none", 0, 0.0,
+                 id="app_matchmake_aborts"),
+    pytest.param(_end_by_cancel_abort, Reason.ABORTED, "none", 0, 0.0,
+                 id="app_cancel_aborts"),
 ]
 
 
@@ -331,13 +361,15 @@ FINALIZE_PATHS = [
 async def test_every_ending_logs_exactly_one_game_finalized_line(
     app, clock, caplog, drive, reason, winner, plies, duration,
 ):
-    """Eight code paths end a game and they used to log eight different things --
-    or, for the commonest one of all (mate after a move), nothing at all. They all
-    run through finalize_and_broadcast, so the one line lives there: whatever ends
-    a game, the journal gets exactly one `game finalized` with the same fields.
+    """Ten code paths end a game and the first eight used to log eight different
+    things -- or, for the commonest one of all (mate after a move), nothing at
+    all. They all run through finalize_and_broadcast, so the one line lives
+    there: whatever ends a game, the journal gets exactly one `game finalized`
+    with the same fields. The two newest are the calls-off from routes_http: a
+    new search, or a cancel, from a pairing nobody has moved in.
 
-    The parametrisation is the point. A ninth ending added anywhere else would
-    only be covered here if it, too, went through the funnel."""
+    The parametrisation is the point. An eleventh ending added anywhere else
+    would only be covered here if it, too, went through the funnel."""
     with caplog.at_level(logging.INFO, logger="chess.server.app"):
         room = await drive(app, clock)
     assert room.result is not None, "the driver has to actually end the game"

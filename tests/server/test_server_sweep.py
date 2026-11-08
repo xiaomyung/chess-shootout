@@ -12,7 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
+from chessshootout.frontend.menu.time_picker import CHAMBERS
 from chessshootout.server.app import create_app
 from chessshootout.server.protocol import (
     GRACE_SECONDS, HEARTBEAT_TIMEOUT_SECONDS, QUEUE_MAX_WAIT_SECONDS, Reason,
@@ -38,7 +40,7 @@ def sweep(app):
     [
         pytest.param(5, 0, True, 61, ("aborted", None), None,
                      id="no_first_move_aborts"),
-        pytest.param(1, 1, True, 70, None, Reason.TIMEOUT,
+        pytest.param(1, 2, True, 70, None, Reason.TIMEOUT,
                      id="flagged_clock_times_out"),
         pytest.param(5, 1, True, 61, ("aborted", None), None,
                      id="black_never_replies_aborts"),
@@ -105,25 +107,157 @@ async def test_a_flag_in_the_same_tick_beats_the_idle_resign(sweep, app, clock):
 
 
 @pytest.mark.asyncio
-async def test_a_bullet_flag_before_the_ply_one_abort_deadline_is_a_timeout(
-    sweep, app, clock,
-):
-    """Locked product decision: first event wins — a flag that lands with or
-    before the abort deadline stands as a normal timeout. At 1+0 the replier's
-    whole clock fits inside the 60 s ply-1 abort window, so black never
-    replying to white's first move flags on the clock branch before the idle
-    branch gets a look: a real TIMEOUT with a series point for white, not a
-    no-fault abort."""
+async def test_a_bullet_ply_one_silence_aborts_before_the_flag(sweep, app, clock):
+    """Deck #97. At 1+0 the ply-1 abort window used to be the full 60 s, the same
+    as black's whole clock, so the two ran out in the same tick and the flag
+    always won: the "Abort in N" badge counted toward an abort that could never
+    happen. The window is now half the starting clock. Stepped below the window
+    -- one big jump would flag first and prove nothing -- the abort fires at 30 s
+    with black still holding half their time, and nobody scores."""
     room = await pair_room(app.state.rooms, time_minutes=1)
     room.started_at = clock()
     assert room.backend.try_move(Square(6, 4), Square(4, 4)).legal
     room.first_move_at = clock()
     room.plies_ever = 1
-    room.idle_since = clock()
-    clock.advance(61)
+    room.mark_idle_activity(clock())
+    clock.advance(29)
     await sweep.step_clock_and_idle_windows()
-    assert room.result == (Reason.TIMEOUT, "white")
-    assert room.series_scores == {room.white.client_uuid: 1.0}
+    assert room.result is None
+    clock.advance(2)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.ABORTED, None)
+    assert room.backend.clock.black_remaining > 0
+    assert room.backend.clock.flagged is None
+    assert room.series_scores == {}
+
+
+@pytest.mark.asyncio
+async def test_a_bullet_ply_zero_silence_aborts_at_thirty_seconds_uncharged(
+        sweep, app, clock):
+    """The ply-0 window is halved the same way, and white's clock is never
+    ticked by the sweep before the first move."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    clock.advance(29)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is None
+    clock.advance(2)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.ABORTED, None)
+    assert room.backend.clock.white_remaining == 60.0
+    assert room.series_scores == {}
+
+
+ONLINE_CHAMBER_MINUTES = [minutes for minutes, _ in CHAMBERS if minutes is not None]
+
+
+def test_the_online_chambers_this_module_walks_are_the_picker_s_own():
+    assert ONLINE_CHAMBER_MINUTES == [1, 3, 5, 10, 15, 30]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes", ONLINE_CHAMBER_MINUTES)
+async def test_ply_one_silence_ends_aborted_never_on_time_at_every_chamber(
+        sweep, app, clock, minutes):
+    """Black never replying to white's first move is an abort at every time
+    control the picker offers online, never a timeout: the window is shorter
+    than black's clock, so stepping the sweep a second at a time reaches it
+    first."""
+    room = await pair_room(app.state.rooms, time_minutes=minutes)
+    assert room.backend.try_move(Square(6, 4), Square(4, 4)).legal
+    room.first_move_at = clock()
+    room.plies_ever = 1
+    room.mark_idle_activity(clock())
+    window = room.idle_window().seconds
+    assert window < minutes * 60
+    for _ in range(int(window) - 1):
+        clock.advance(1)
+        await sweep.step_clock_and_idle_windows()
+        assert room.result is None
+    clock.advance(1)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.ABORTED, None)
+    assert clock() == pytest.approx(window)
+    assert room.backend.clock.flagged is None
+    assert room.backend.clock.black_remaining > 0
+
+
+def _take_back_to_empty(room, clock, plies):
+    """Play `plies` stock plies, then rewind every one the way an accepted
+    takeback does: undo, then re-anchor the clock at the rewind."""
+    play_plies(room, plies)
+    room.plies_ever = plies
+    for _ in range(plies):
+        room.backend.undo()
+    room.backend.clock.reanchor(clock())
+    assert room.backend.move_history == []
+
+
+@pytest.mark.asyncio
+async def test_a_board_taken_back_to_empty_at_ply_one_still_aborts(sweep, app, clock):
+    """The sweep keeps charging an empty board after a takeback, from the
+    rewind on, but at plies_ever=1 the abort window is half the clock at most,
+    so it fires first and the game ends with no winner."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    _take_back_to_empty(room, clock, 1)
+    room.mark_idle_activity(clock())
+    white_before = room.backend.clock.white_remaining
+    black_before = room.backend.clock.black_remaining
+    assert room.running_backend() is room.backend
+    window = room.idle_window()
+    assert window.outcome == Reason.ABORTED and window.seconds < white_before
+    clock.advance(10)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is None
+    assert room.backend.clock.white_remaining == pytest.approx(white_before - 10)
+    assert room.backend.clock.black_remaining == black_before
+    clock.advance(window.seconds - 10)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.ABORTED, None)
+    assert room.backend.clock.flagged is None
+
+
+@pytest.mark.asyncio
+async def test_a_board_taken_back_to_empty_past_ply_two_flags_on_time(sweep, app, clock):
+    """REGRESSION: with three plies ever played no idle window arms, so a board
+    taken all the way back used to sit uncharged forever and hold its room.
+    The clock now runs from the takeback and the side to move flags."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    _take_back_to_empty(room, clock, 3)
+    assert room.idle_window() is None
+    white_left = room.backend.clock.white_remaining
+    for _ in range(int(white_left) - 1):
+        clock.advance(1)
+        await sweep.step_clock_and_idle_windows()
+        assert room.result is None
+    clock.advance(1)
+    await sweep.step_clock_and_idle_windows()
+    assert room.backend.clock.flagged == PieceColor.WHITE
+    assert room.result == (Reason.TIMEOUT, "black")
+
+
+@pytest.mark.asyncio
+async def test_a_board_taken_back_to_empty_at_ply_two_flags_with_the_shown_countdown(
+        sweep, app, clock):
+    """At plies_ever=2 the resign window is shown capped at the mover's clock;
+    on an empty board that clock now really runs, so the badge reaching zero
+    and the server's flag land on the same tick."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    _take_back_to_empty(room, clock, 2)
+    room.backend.clock.white_remaining = 20.0
+    room.mark_idle_activity(clock())
+    assert room.idle_window().outcome == Reason.RESIGNATION
+    assert room.idle_display_remaining(clock()) == pytest.approx(20.0)
+    clock.advance(19)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is None
+    assert room.idle_display_remaining(clock()) == pytest.approx(1.0)
+    clock.advance(1)
+    assert room.idle_display_remaining(clock()) == 0.0
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.TIMEOUT, "black")
 
 
 @pytest.mark.asyncio
@@ -214,7 +348,7 @@ async def test_sweep_step_grace_expired_without_desync_awards_opponent(sweep, ap
     room = await pair_room(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    room.plies_ever = 1
+    room.plies_ever = 2
     room.white.connected = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
@@ -225,11 +359,11 @@ async def test_sweep_step_grace_expired_without_desync_awards_opponent(sweep, ap
 @pytest.mark.asyncio
 async def test_sweep_step_grace_expired_with_desync_awards_opponent(sweep, app, clock):
     """See test_server_app: the desync flag never downgrades an abandonment win
-    once moves were played; zero-ply games abort via finalize_result instead."""
+    once both sides moved; earlier games abort via finalize_result instead."""
     room = await pair_room(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    room.plies_ever = 1
+    room.plies_ever = 2
     room.white.connected = True
     room.white.desync_active = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
@@ -251,7 +385,7 @@ async def test_post_game_leaver_never_closes_the_window_on_the_player_who_stayed
     room = await pair_room(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    room.plies_ever = 1
+    room.plies_ever = 2
     room.white.connected = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
@@ -278,7 +412,7 @@ async def test_post_game_window_still_expires_on_idle_with_one_player_gone(
     room = await pair_room(app.state.rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    room.plies_ever = 1
+    room.plies_ever = 2
     room.white.connected = True
     app.state.rooms.mark_disconnected(room.room_id, "white")
     clock.advance(61)
@@ -312,7 +446,7 @@ async def test_sweep_step_grace_expired_revalidates_a_reconnect_that_lands_mid_p
     room_a = await pair_room(rooms)
     room_a.started_at = clock()
     room_a.first_move_at = clock()
-    room_a.plies_ever = 1
+    room_a.plies_ever = 2
     room_a.white.connected = True
     room_a.black.connected = True
 
@@ -322,7 +456,7 @@ async def test_sweep_step_grace_expired_revalidates_a_reconnect_that_lands_mid_p
                                  time_minutes=5, increment_seconds=0, side_preference="black")
     room_b.started_at = clock()
     room_b.first_move_at = clock()
-    room_b.plies_ever = 1
+    room_b.plies_ever = 2
     room_b.white.connected = True
     room_b.black.connected = True
 

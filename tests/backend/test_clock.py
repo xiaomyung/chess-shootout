@@ -146,6 +146,112 @@ def test_remaining_returns_correct_side(color, white_val, black_val, expected):
     assert clock.remaining(color) == expected
 
 
+def test_remaining_at_charges_the_running_side_without_ticking():
+    clock, ts = make_clock(300, 5)
+    clock.start()
+    ts[0] = 2.0
+    clock.tick()
+    before = clock.snapshot()
+    assert clock.remaining_at(PieceColor.WHITE, 12.5) == pytest.approx(287.5)
+    assert clock.snapshot() == before
+
+
+def test_remaining_at_leaves_the_waiting_side_at_its_stored_time():
+    clock, ts = make_clock(300, 5)
+    clock.start()
+    assert clock.remaining_at(PieceColor.BLACK, 100.0) == 300
+    clock.on_move_made(PieceColor.WHITE)
+    assert clock.running_for == PieceColor.BLACK
+    assert clock.remaining_at(PieceColor.WHITE, 50.0) == 305
+    assert clock.remaining_at(PieceColor.BLACK, 50.0) == pytest.approx(250.0)
+
+
+def test_remaining_at_floors_at_zero_and_never_flags():
+    clock, _ = make_clock(60, 0)
+    clock.start()
+    assert clock.remaining_at(PieceColor.WHITE, 500.0) == 0.0
+    assert clock.flagged is None
+    assert clock.running_for == PieceColor.WHITE
+    assert clock.white_remaining == 60
+
+
+def test_remaining_at_on_a_stopped_clock_is_the_stored_time():
+    clock, _ = make_clock(300, 0)
+    assert clock.remaining_at(PieceColor.WHITE, 1000.0) == 300
+    clock.start()
+    clock.stop()
+    clock.white_remaining = 12.0
+    assert clock.remaining_at(PieceColor.WHITE, 1000.0) == 12.0
+
+
+def test_remaining_at_floors_a_stored_negative_reading():
+    clock, _ = make_clock(300, 0)
+    clock.black_remaining = -3.0
+    assert clock.remaining_at(PieceColor.BLACK, 0.0) == 0.0
+
+
+def test_remaining_at_an_earlier_moment_adds_time_back():
+    """`now` before the anchor is not clamped: reading at an earlier moment
+    gives more time, the plain arithmetic the cap relies on."""
+    clock, ts = make_clock(300, 0)
+    ts[0] = 10.0
+    clock.start()
+    assert clock.remaining_at(PieceColor.WHITE, 8.0) == pytest.approx(302.0)
+
+
+def test_reanchor_moves_the_countdown_start_of_a_running_clock():
+    clock, ts = make_clock(300, 0)
+    clock.start()
+    ts[0] = 40.0
+    clock.reanchor(40.0)
+    assert clock.last_tick_at == 40.0
+    clock.tick()
+    assert clock.white_remaining == 300
+
+
+def test_reanchor_into_the_past_charges_the_backdated_time():
+    """The client's late-join backdate: anchoring 7 s back charges those 7 s on
+    the next tick."""
+    clock, ts = make_clock(60, 0)
+    ts[0] = 100.0
+    clock.start()
+    clock.reanchor(93.0)
+    clock.tick()
+    assert clock.white_remaining == pytest.approx(53.0)
+    assert clock.running_for == PieceColor.WHITE
+
+
+def test_reanchor_is_a_no_op_on_a_stopped_clock():
+    clock, ts = make_clock(300, 0)
+    clock.reanchor(50.0)
+    assert clock.last_tick_at is None
+    assert clock.running_for is None
+    clock.start()
+    clock.stop()
+    clock.reanchor(50.0)
+    assert clock.last_tick_at is None
+
+
+def test_reanchor_is_a_no_op_on_a_flagged_clock():
+    clock, ts = make_clock(10, 0)
+    clock.start()
+    ts[0] = 20.0
+    clock.tick()
+    assert clock.flagged == PieceColor.WHITE
+    clock.reanchor(25.0)
+    assert clock.last_tick_at is None
+    assert clock.running_for is None
+
+
+def test_reanchor_touches_nothing_but_the_anchor():
+    clock, ts = make_clock(300, 5)
+    clock.start()
+    clock.on_move_made(PieceColor.WHITE)
+    white, black, running, _, flagged = clock.snapshot()
+    clock.reanchor(77.0)
+    assert clock.snapshot() == (white, black, running, 77.0, flagged)
+
+
 def test_snapshot_restore_round_trip():
     clock, ts = make_clock(300, 5)
     clock.start()

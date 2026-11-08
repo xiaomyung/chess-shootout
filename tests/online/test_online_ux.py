@@ -15,18 +15,22 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from tests.helpers import online_start_payload
+from tests.helpers import FakeOnlineClient, online_start_payload
+from chessshootout import paths
 from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import BOARD_SIZE, Square
+from chessshootout.domain.match import ONLINE, SINGLE_SCREEN
 from chessshootout.frontend.frontend import Frontend
 from chessshootout.frontend import online_coordinator as coordinator_module
+from chessshootout.frontend.game.result_flow import RESULT_TEXT
 from chessshootout.frontend.online_coordinator import RECONNECT_MODAL_DEBOUNCE_MS
+from chessshootout.online.client import Event
 from chessshootout.frontend.screens.game import (
     ANIM_MS_DEFAULT, ANIM_MS_MIN, ANIM_MS_MAX, compute_animation_ms,
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
-from chessshootout.frontend.modals.result import ResultButtons
+from chessshootout.frontend.modals.result import NEW_SEARCH_LABEL, ResultButtons
 from chessshootout.frontend.online_coordinator import (
     MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_GAME_STATE_REASONS,
     ONLINE_HARD_FAILURE_LABELS, ONLINE_HARD_FAILURE_REASONS,
@@ -251,6 +255,9 @@ def test_match_found_transition_plays_online_game_start_sound(frontend):
         pytest.param(Reason.INVALID_FIELD,
                      ONLINE_HARD_FAILURE_LABELS[Reason.INVALID_FIELD],
                      id="invalid_field_friendly_label"),
+        pytest.param("search_lost",
+                     ONLINE_HARD_FAILURE_LABELS["search_lost"],
+                     id="search_lost_friendly_label"),
         pytest.param("http_503", "Server unreachable",
                      id="http_prefixed_falls_back_to_generic"),
     ],
@@ -459,6 +466,22 @@ def test_hard_failure_set_is_well_formed():
     assert "reconnect_failed" in ONLINE_HARD_FAILURE_REASONS
 
 
+def test_a_lost_search_takes_the_wait_card_down_and_offers_a_new_search(frontend):
+    """The client reports a game socket that closed before the game started
+    (a cancel that raced the pairing, a server restart while queued) as a lost
+    search: the wait card goes instead of counting forever, and the confirm
+    offers New Search."""
+    frontend.coordinator.client = FakeOnlineClient()
+    frontend.coordinator.wait_modal.show("Blitz", "5 + 0", on_cancel=lambda: None)
+
+    frontend.coordinator._handle_online_error({"reason": "search_lost"})
+
+    assert not frontend.coordinator.wait_modal.is_visible()
+    assert frontend.confirm_modal.is_visible()
+    assert frontend.confirm_modal.title == "Search interrupted"
+    assert frontend.confirm_modal.yes_label == NEW_SEARCH_LABEL
+
+
 def test_a_refused_request_tears_the_search_down_instead_of_spinning(frontend):
     """A body the server refuses used to reach the client as the generic
     `http_422`, which landed on this modal only by way of the `http_` prefix
@@ -624,6 +647,8 @@ def test_decline_rematch_sends_false_and_clears(frontend):
     assert sent == [False]
     assert frontend.coordinator._rematch_offered is False
     assert frontend.game.result_menu.rematch_offered is False
+    assert frontend.game.result_menu.rematch_withheld is True, \
+        "the decliner's own Rematch does not come back for the round trip"
 
 
 def test_rematch_update_reconnecting_keeps_client(frontend):
@@ -718,21 +743,81 @@ def test_the_rematch_window_closing_under_the_result_card_keeps_the_online_board
 def test_new_search_from_a_closed_result_card_starts_a_fresh_search(
         frontend, tmp_path, monkeypatch):
     """The card's New Search row: the finished board is torn down for good, the
-    player lands on the menu, and the search repeats the last settings."""
+    player lands on the menu, and the search asks for what the Play panel shows
+    now -- not what the last search (or the resumed room) happened to use."""
     _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
     _close_window_by_decline(frontend)
-    config = {"nickname": "Me", "time_minutes": 5, "increment_seconds": 0, "side": "white"}
-    frontend.coordinator._online_config = config
+    frontend.coordinator._online_config = {
+        "nickname": "Me", "time_minutes": 5, "increment_seconds": 0, "side": "white"}
+    hero = frontend.menu.play_view
+    hero.selected_side = "black"
+    hero.selected_time_minutes = 3
+    hero.selected_increment_seconds = 2
     searches = []
-    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow",
-                        lambda cfg: searches.append(cfg))
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", searches.append)
 
     frontend.game.result_menu.callbacks["new_search"]()
 
-    assert searches == [config]
+    assert len(searches) == 1
+    assert searches[0]["mode"] == ONLINE
+    assert searches[0]["side"] == "black"
+    assert (searches[0]["time_minutes"], searches[0]["increment_seconds"]) == (3, 2)
     assert frontend.screen is frontend.menu
     assert frontend.game.variant == "local"
     assert frontend.game.current_result() is None
+
+
+def test_new_search_is_online_even_when_the_menu_chip_says_local(
+        frontend, tmp_path, monkeypatch):
+    """A player who flipped the mode chip to Local during the rematch window
+    still gets an online search from New Search -- that is what the button
+    says it does."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_expiry(frontend)
+    frontend.menu.play_view.selected_mode = SINGLE_SCREEN
+    searches = []
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", searches.append)
+
+    frontend.game.result_menu.callbacks["new_search"]()
+
+    assert [cfg["mode"] for cfg in searches] == [ONLINE]
+
+
+def test_play_then_new_search_uses_the_latest_menu_choice(frontend, tmp_path, monkeypatch):
+    """Scenario (b): after a game the player goes to the menu, changes side,
+    presses Play, and a later New Search repeats that latest choice."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    frontend._on_back_to_menu()
+    hero = frontend.menu.play_view
+    hero.selected_mode = ONLINE
+    hero.selected_side = "white"
+    connects = []
+    monkeypatch.setattr(frontend.coordinator, "_on_server_addr_connect",
+                        lambda addr: connects.append(frontend.coordinator._online_config))
+    frontend._on_start_game(hero.build_config())
+    assert [cfg["side"] for cfg in connects] == ["white"]
+
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_expiry(frontend)
+    searches = []
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", searches.append)
+    frontend.game.result_menu.callbacks["new_search"]()
+
+    assert [cfg["side"] for cfg in searches] == ["white"]
+
+
+def test_new_search_clears_the_series_the_closed_card_kept(frontend, tmp_path, monkeypatch):
+    """The closed card keeps showing the finished series, but the moment the
+    board is cut loose for a new search the tally is gone, so it can never
+    reach the next game's round label."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_expiry(frontend)
+    assert frontend.game.result_flow.series_score("white") == 2.0
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", lambda cfg: None)
+
+    frontend.game.result_menu.callbacks["new_search"]()
+
+    assert frontend.game.result_flow.series_scores == {}
 
 
 def test_menu_from_a_closed_result_card_returns_to_the_play_view(
@@ -767,9 +852,9 @@ def test_abandon_online_game_logs_the_teardown_reason(frontend, caplog):
     assert lines == ["online session teardown reason=reconnect_cancelled"]
 
 
-def test_restart_search_logs_the_teardown_reason(frontend, caplog):
+def test_restart_search_logs_the_teardown_reason(frontend, caplog, monkeypatch):
     frontend.coordinator.client = SimpleNamespace(disconnect=lambda: None)
-    frontend._online_config = None
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", lambda cfg: None)
     with caplog.at_level(logging.INFO, logger="chess.frontend"):
         frontend.coordinator.restart_search()
     lines = [r.getMessage() for r in caplog.records
@@ -841,3 +926,272 @@ def test_match_found_rematch_uses_rematch_eyebrow(frontend):
     frontend.coordinator.match_found_modal.window.fill((0, 0, 0))
     frontend.coordinator.match_found_modal.draw()
     assert frontend.coordinator.match_found_modal.rematch is True
+
+
+def test_the_decliners_rematch_button_stays_hidden_until_the_window_expired_echo(
+        frontend, tmp_path, monkeypatch):
+    """Deny used to bring the decliner's own Rematch back into the exact slot
+    New Search takes one round trip later, and a click there asked for a
+    rematch the server was already dropping. The decision hides the button;
+    the server's echo turns the card over, and doing so twice is harmless."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    client = FakeOnlineClient()
+    frontend.coordinator.client = client
+    frontend.coordinator._handle_rematch_request()
+
+    frontend.coordinator._decline_rematch()
+
+    menu = frontend.game.result_menu
+    assert client.rematch_responses == [False]
+    assert menu.button_state is ResultButtons.ONLINE, "no early flip while the client lives"
+    assert menu.rematch_offered is False
+    assert menu.rematch_withheld is True
+    assert frontend.coordinator.offer_banners.is_empty()
+    assert frontend.coordinator.client is client, "the session stays open for the echo"
+    drawn = _drawn_buttons(frontend)
+    assert "rematch" not in drawn
+    assert "new_search" not in drawn
+
+    client.queue(Event("rematch_update", {"event": "window_expired"}))
+    frontend.coordinator.update(pg.time.get_ticks())
+
+    assert frontend.coordinator.client is None
+    assert menu.button_state is ResultButtons.ONLINE_CLOSED
+    assert frontend.screen is frontend.game
+    assert frontend.game.variant == "online"
+    drawn = _drawn_buttons(frontend)
+    assert "new_search" in drawn
+    assert "rematch" not in drawn
+    frontend.coordinator._end_rematch_window()
+    assert menu.button_state is ResultButtons.ONLINE_CLOSED
+
+
+def test_a_decline_answered_by_a_withdrawal_brings_the_rematch_button_back(
+        frontend, tmp_path, monkeypatch):
+    """REGRESSION: the offerer withdrew (left the result card) just as the
+    player hit Decline, so the server answered the decline with a noop and no
+    window_expired echo ever came. The withheld flag outlived the offer and
+    hid the player's own Rematch for the rest of the open window."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    client = FakeOnlineClient()
+    frontend.coordinator.client = client
+    frontend.coordinator._handle_rematch_request()
+    frontend.coordinator._decline_rematch()
+    menu = frontend.game.result_menu
+    assert menu.rematch_withheld is True
+
+    client.queue(Event("rematch_update", {"event": "cancelled"}))
+    frontend.coordinator.update(pg.time.get_ticks())
+
+    assert menu.rematch_withheld is False
+    assert menu.rematch_offered is False
+    assert menu.button_state is ResultButtons.ONLINE
+    assert frontend.coordinator.client is client, "the window is still open"
+    drawn = _drawn_buttons(frontend)
+    assert "rematch" in drawn
+    assert "new_search" not in drawn
+
+
+def test_events_behind_a_session_teardown_are_dropped(frontend, tmp_path, monkeypatch, caplog):
+    """The server's ws_session finally can send the decliner an
+    opponent_reconnecting notice for a room it already dropped, in the same
+    batch as window_expired. The batch stops at the teardown, so the card does
+    not end up saying the closed session is waiting for the opponent."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    client = FakeOnlineClient()
+    frontend.coordinator.client = client
+    handled = []
+    real = frontend.coordinator._handle_online_event
+
+    def spy(event):
+        handled.append(event.type)
+        real(event)
+
+    monkeypatch.setattr(frontend.coordinator, "_handle_online_event", spy)
+    client.queue(Event("rematch_update", {"event": "window_expired"}))
+    client.queue(Event("rematch_update", {"event": "opponent_reconnecting"}))
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        frontend.coordinator.update(pg.time.get_ticks())
+
+    assert handled == ["rematch_update"]
+    texts = _toast_texts(frontend)
+    assert "Rematch window closed" in texts
+    assert not any("disconnected" in text for text in texts)
+    drops = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("online inbound dropped")]
+    assert drops == ["online inbound dropped=1 after session change"]
+
+
+def _toast_texts(frontend):
+    return [bubble["message"] for bubble in frontend.toast._bubbles]
+
+
+def _drawn_buttons(frontend):
+    """Draw the result card the way the game screen does once its reveal beat
+    has passed, and return the buttons it put on the row."""
+    frontend.game.result_flow.feed_result_menu()
+    frontend.game.result_menu.draw()
+    return set(frontend.game.result_menu.button_rects)
+
+
+def _pairing_behind_the_card(frontend, tmp_path, monkeypatch):
+    """A closed card's New Search found a new opponent: the player is on the
+    menu behind the match-found card, and the game screen is a clean local
+    board that has not been handed the new pairing yet."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    _close_window_by_expiry(frontend)
+    monkeypatch.setattr(frontend.coordinator, "_begin_online_flow", lambda cfg: None)
+    frontend.game.result_menu.callbacks["new_search"]()
+    frontend.coordinator.client = FakeOnlineClient("room-2")
+    frontend.coordinator._begin_match_found_transition(
+        online_start_payload(white_name="Me", black_name="Newcomer"))
+    assert frontend.coordinator._pending_game_start_payload is not None
+    assert frontend.screen is frontend.menu
+
+
+def _saved_games(tmp_path):
+    games_dir = paths.get_games_dir()
+    if not games_dir.exists():
+        return {}
+    return {path.name: path.read_bytes() for path in games_dir.glob("*.pgn")}
+
+
+def test_a_result_arriving_behind_the_match_found_card_never_reaches_the_old_board(
+        frontend, tmp_path, monkeypatch, caplog):
+    """The opponent started another search before the card finished, so the
+    server aborted the unstarted room. Forwarding that result at once would
+    settle -- and re-save -- whatever the game screen last showed, so it is
+    parked for the board the card is about to start."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    forwarded = []
+    monkeypatch.setattr(frontend.game, "on_result", forwarded.append)
+    before = _saved_games(tmp_path)
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+
+    assert forwarded == []
+    assert frontend.coordinator._pending_result == {"reason": Reason.ABORTED}
+    assert frontend.game.current_result() is None
+    assert frontend.game.manual_result is None
+    assert _saved_games(tmp_path) == before
+    assert any(r.getMessage().startswith("online result parked pregame")
+               for r in caplog.records)
+
+
+def test_a_result_parked_behind_the_card_settles_the_new_board_once_it_starts(
+        frontend, tmp_path, monkeypatch):
+    """REGRESSION: the result behind the match-found card is the new game's
+    own -- a ply-0 resign, or an abort window that ran out during a late
+    catch-up card. It used to be dropped, so the board started live on a room
+    the server had already finished, under an abort countdown nothing would
+    ever end. It now lands on that board as soon as the card is done, after
+    the abort countdown, so the countdown is cleared again."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    payload = {"reason": Reason.ABORTED, "winner_color": None}
+    frontend.coordinator._handle_online_result(payload)
+    assert frontend.game.current_result() is None
+
+    frontend.coordinator._finish_match_found()
+
+    assert frontend.screen is frontend.game
+    assert frontend.game.current_result() == "aborted"
+    assert frontend.game._idle_window is None
+    assert frontend.coordinator._pending_result is None
+
+
+def test_a_parked_result_never_outlives_the_pairing_it_was_kept_for(
+        frontend, tmp_path, monkeypatch):
+    """Clearing the search state (the opponent left, a new search, a resumed
+    game) throws a parked result away with the pairing, so it can never land
+    on a later board."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+    frontend.coordinator._clear_search_state()
+    assert frontend.coordinator._pending_result is None
+    frontend.coordinator._pending_result = {"reason": Reason.ABORTED}
+    frontend.coordinator._drop_client()
+    assert frontend.coordinator._pending_result is None
+
+
+def test_a_result_arriving_while_still_queued_never_reaches_the_board(frontend, monkeypatch):
+    frontend.coordinator.client = FakeOnlineClient()
+    frontend.coordinator.wait_modal.show("Blitz", "5 + 0", lambda: None)
+    forwarded = []
+    monkeypatch.setattr(frontend.game, "on_result", forwarded.append)
+
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+
+    assert forwarded == []
+
+
+def test_opponent_left_behind_the_match_found_card_tears_the_pairing_down(
+        frontend, tmp_path, monkeypatch):
+    """After the parked result, the opponent_left notice is what ends the
+    pairing: the card goes with the parked result, the toast names the
+    opponent from that pairing (not the previous game's), and the player is
+    back on the Play panel."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+
+    frontend.coordinator._handle_rematch_update({"event": "opponent_left"})
+
+    texts = _toast_texts(frontend)
+    assert "Newcomer left the game" in texts
+    assert not any(text.startswith("Them ") for text in texts), "not the old game's opponent"
+    assert frontend.coordinator._pending_game_start_payload is None
+    assert frontend.coordinator._pending_result is None
+    assert not frontend.coordinator.match_found_modal.is_visible()
+    assert frontend.coordinator.client is None
+    assert frontend.screen is frontend.menu
+    assert frontend.menu.play_view_visible()
+    assert frontend.game.current_result() is None
+
+
+@pytest.mark.parametrize("act, counter", [
+    pytest.param("_perform_resign", "resigns", id="resign"),
+    pytest.param("_perform_draw", "draw_offers", id="draw"),
+])
+def test_a_pregame_resign_or_draw_goes_to_the_server_and_comes_back_a_scoreless_abort(
+        frontend, tmp_path, monkeypatch, act, counter):
+    """Online, resigning or offering a draw is sent, never settled on the
+    board. Before both sides have moved the server answers with an abort, and
+    the client adopts it as one: no series point, nothing to save."""
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    client = FakeOnlineClient()
+    frontend.coordinator.client = client
+    frontend.coordinator._start_online_game(
+        online_start_payload(white_score=1.0, black_score=0.5))
+    game = frontend.game
+
+    getattr(game, act)()
+
+    assert getattr(client, counter) == 1
+    assert game.current_result() is None, "the ending comes back from the server"
+
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+
+    assert game.current_result() == Reason.ABORTED
+    assert RESULT_TEXT[Reason.ABORTED][0] == "Game aborted"
+    assert game.result_flow.series_scores == {"white": 1.0, "black": 0.5}
+    assert game.result_flow.pgn_available() is False
+    assert game.result_menu.button_state is ResultButtons.ONLINE
+
+
+def test_an_abort_followed_by_opponent_left_leaves_the_card_on_new_search(
+        frontend, tmp_path, monkeypatch):
+    monkeypatch.setenv("CHESS_DATA_DIR", str(tmp_path))
+    frontend.coordinator.client = FakeOnlineClient()
+    frontend.coordinator._start_online_game(online_start_payload())
+    frontend.game._perform_resign()
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+
+    frontend.coordinator._handle_rematch_update({"event": "opponent_left"})
+
+    menu = frontend.game.result_menu
+    assert frontend.screen is frontend.game
+    assert frontend.coordinator.client is None
+    assert menu.button_state is ResultButtons.ONLINE_CLOSED
+    assert _drawn_buttons(frontend) == {"new_search", "menu"}, \
+        "nothing was saved for an unplayed game, so no Open PGN"

@@ -155,6 +155,36 @@ class Clock:
         """
         return self.white_remaining if color == PieceColor.WHITE else self.black_remaining
 
+    def remaining_at(self, color: PieceColor, now: float) -> float:
+        """
+        Read what one side would have left at a given moment if the clock were
+        ticked then, without ticking it. The server uses this to cap a countdown
+        it shows at the live clock while leaving the clock itself untouched
+
+        :param color: side to read
+        :param now: moment to read at, in the same monotonic seconds as the
+            clock's time source
+        :returns: seconds remaining for that side at `now`, never below 0
+        """
+        remaining = self.remaining(color)
+        if self.running_for == color and self.last_tick_at is not None:
+            remaining -= now - self.last_tick_at
+        return max(remaining, 0.0)
+
+    def reanchor(self, at: float) -> None:
+        """
+        Move the running side's countdown start to a chosen moment, so time is
+        charged from there on the next tick. A takeback re-anchors to now so the
+        undone ply's thinking time is not charged again, and a client joining a
+        game late backdates the anchor to charge the time already gone. A
+        stopped clock is left alone
+
+        :param at: new countdown start, in the same monotonic seconds as the
+            clock's time source
+        """
+        if self.running_for is not None:
+            self.last_tick_at = at
+
     def snapshot(self) -> ClockSnapshot:
         """
         Capture the whole clock so an undo or an agreed takeback can put it back

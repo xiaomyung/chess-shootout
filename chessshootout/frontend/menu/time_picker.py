@@ -15,6 +15,8 @@ from chessshootout.frontend.visual.tween import Tween
 
 
 CHAMBERS = ((1, "1"), (3, "3"), (5, "5"), (10, "10"), (15, "15"), (30, "30"), (None, "∞"))
+TIMED_MINUTES = tuple(minutes for minutes, _ in CHAMBERS if minutes is not None)
+ONLINE_DEFAULT_TIME_MINUTES = 5
 INCREMENTS = (0, 2, 5, 10, 15)
 CHAMBER_COUNT = len(CHAMBERS)
 CHAMBER_STEP_DEG = 360.0 / CHAMBER_COUNT
@@ -233,6 +235,7 @@ class TimePicker:
         self._on_change = on_change
         self._on_tick = on_tick
         self._on_ratchet = on_ratchet
+        self._untimed_allowed = True
         self._min_index = 3
         self._inc_index = 2
         self.rect = pg.Rect(0, 0, 0, 0)
@@ -296,6 +299,28 @@ class TimePicker:
             return 0
         return INCREMENTS[self._inc_index]
 
+    def set_untimed_allowed(self, allowed: bool) -> None:
+        """
+        Lock or free the untimed chamber, which the Play panel locks while an
+        online game is being set up: a game against a live opponent always has
+        a clock, so the drum must not be able to seat the infinity sign. Locked,
+        the chamber is drawn muted, a click on it does nothing and a spin
+        settles on the nearest chamber that still counts
+
+        :param allowed: True when the untimed chamber may be seated
+        """
+        self._untimed_allowed = allowed
+
+    def _chamber_allowed(self, index: int) -> bool:
+        """
+        Say whether a chamber may be seated right now, the one test every
+        way of choosing a chamber -- click, spin, settle or set -- runs through
+
+        :param index: chamber index into the offered time controls
+        :returns: True unless it is the untimed chamber while that is locked
+        """
+        return self._untimed_allowed or CHAMBERS[index][0] is not None
+
     def set_selection(self, minutes: int | None, increment: int) -> None:
         """
         Put the picker on a given time control with no animation at all, which
@@ -304,12 +329,13 @@ class TimePicker:
         -- spins, drags and swings -- is dropped
 
         :param minutes: minutes per side, or None for the untimed chamber; a
-            value the drum does not carry leaves the chamber where it was
+            value the drum does not carry, or a chamber that is locked, leaves
+            the chamber where it was
         :param increment: seconds added per move, ignored unless it is one of
             the turret's own values
         """
         self._min_index = self._chamber_index_for(minutes)
-        if minutes is None:
+        if self.selected_minutes is None:
             self._inc_index = 0
         elif increment in INCREMENTS:
             self._inc_index = INCREMENTS.index(increment)
@@ -332,10 +358,11 @@ class TimePicker:
 
         :param minutes: minutes per side, or None for the untimed chamber
         :returns: index of that chamber, or the current one when the drum has
-            no chamber for that value
+            no chamber for that value or that chamber is locked
         """
-        return next((i for i, (value, _) in enumerate(CHAMBERS) if value == minutes),
-                    self._min_index)
+        index = next((i for i, (value, _) in enumerate(CHAMBERS) if value == minutes),
+                     self._min_index)
+        return index if self._chamber_allowed(index) else self._min_index
 
     def readout_text(self) -> str:
         """
@@ -416,7 +443,9 @@ class TimePicker:
     def _nearest_chamber(self, pos: tuple[int, int]) -> int:
         """
         Pick the chamber closest to where the player clicked, so anywhere on
-        the drum face selects something rather than only the small circles
+        the drum face selects something rather than only the small circles. A
+        locked chamber is still the answer when it is the closest, and the
+        seating step then refuses it, so a click on it seats nothing new
 
         :param pos: click position in window pixels
         :returns: index of the nearest chamber
@@ -432,6 +461,27 @@ class TimePicker:
             cx, cy = self.chamber_center(i)
             return (cx - pos[0]) ** 2 + (cy - pos[1]) ** 2
         return min(range(CHAMBER_COUNT), key=sq_dist)
+
+    def _nearest_allowed_to_rotation(self) -> int:
+        """
+        Find the chamber a free-turning drum is closest to seating, skipping a
+        locked chamber so a spin can never come to rest on it
+
+        :returns: index of the nearest chamber that may be seated
+        """
+        return min((i for i in range(CHAMBER_COUNT) if self._chamber_allowed(i)),
+                   key=lambda i: abs(self._seat_delta(i)))
+
+    def _seat_delta(self, index: int) -> float:
+        """
+        How far the drum still has to turn to bring one chamber under the
+        hammer, the short way round: the single angle rule that seating by
+        click, settling a spin and picking the nearest chamber all share
+
+        :param index: chamber index to measure
+        :returns: signed degrees of turn, within half a turn either way
+        """
+        return ((-index * CHAMBER_STEP_DEG - self._rotation + 180.0) % 360.0) - 180.0
 
     def _turret_label_rect(self, i: int) -> pg.Rect:
         """
@@ -675,15 +725,14 @@ class TimePicker:
         Seat a chamber: the choice counts from this moment, and the drum then
         turns the short way round to bring it under the hammer, clicking once
         per chamber it passes. Landing on the untimed chamber kills the
-        increment with it
+        increment with it; a locked chamber cannot be seated at all
 
         :param index: chamber index to seat
         """
-        if index == self._min_index:
+        if index == self._min_index or not self._chamber_allowed(index):
             return
         self._min_index = index
-        base_target = -index * CHAMBER_STEP_DEG
-        delta = ((base_target - self._rotation + 180.0) % 360.0) - 180.0
+        delta = self._seat_delta(index)
         self._rot_start = self._rotation
         self._rot_target = self._rotation + delta
         self._rot_steps = int(round(abs(delta) / CHAMBER_STEP_DEG))
@@ -824,13 +873,13 @@ class TimePicker:
 
     def _settle_from_spin(self) -> None:
         """
-        Bring a free spin to rest on a real chamber: the nearest one is adopted
-        as the choice at once, and the drum eases the last few degrees onto it.
-        Stopping on the untimed chamber kills the increment as a click would
+        Bring a free spin to rest on a real chamber: the nearest one that may
+        be seated is adopted as the choice at once, and the drum eases the last
+        few degrees onto it. Stopping on the untimed chamber kills the
+        increment as a click would
         """
-        index = round(-self._rotation / CHAMBER_STEP_DEG) % CHAMBER_COUNT
-        base_target = -index * CHAMBER_STEP_DEG
-        delta = ((base_target - self._rotation + 180.0) % 360.0) - 180.0
+        index = self._nearest_allowed_to_rotation()
+        delta = self._seat_delta(index)
         self._rot_start = self._rotation
         self._rot_target = self._rotation + delta
         self._rot_steps = int(round(abs(delta) / CHAMBER_STEP_DEG))
@@ -968,7 +1017,8 @@ class TimePicker:
         Paint the minute drum: the cylinder with its scalloped edge, the star,
         the seven chambers with the chosen one ringed, the pin and the hammer
         at the top. The turning body is cached per rounded angle, and only the
-        numbers -- which must stay upright and can pop -- are drawn live
+        numbers -- which must stay upright and can pop -- are drawn live, a
+        locked chamber's in the muted ink of a dead control
 
         :param surface: surface to draw on, the window or the popover's scratch
         """
@@ -1028,7 +1078,10 @@ class TimePicker:
             cx, cy = self.chamber_center(i)
             sel = i == self._min_index
             label = CHAMBERS[i][1]
-            color = Colors.text if sel else Colors.text_dim
+            if not self._chamber_allowed(i):
+                color = Colors.text_muted
+            else:
+                color = Colors.text if sel else Colors.text_dim
             if label == "∞":
                 glyph = infinity_surface(self._chamber_font.get_height() * 0.8, color)
             else:

@@ -6,7 +6,8 @@ from chessshootout import paths
 from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.menu.layout import MenuLayout
-from chessshootout.frontend.menu.time_picker import CHAMBERS, INCREMENTS, TimePicker
+from chessshootout.frontend.menu.time_picker import (
+    CHAMBERS, INCREMENTS, ONLINE_DEFAULT_TIME_MINUTES, TIMED_MINUTES, TimePicker)
 from chessshootout.frontend.menu.view import MenuView, scale_floor
 from chessshootout.frontend.visual.cache import (
     memoized_surface, new_cache, new_size_cache, render_text)
@@ -91,6 +92,31 @@ PRESS_OFFSET_PX = 1
 
 _HERO_ART_CACHE = new_cache()
 _HERO_SCALED_CACHE = new_size_cache()
+
+
+def _is_whole_number(value: Any) -> bool:
+    """
+    Tell a real integer from anything else a payload could carry in its place,
+    booleans included, since True would otherwise pass for one minute
+
+    :param value: the payload field being checked
+    :returns: True only for an int that is not a bool
+    """
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _valid_timed_control(minutes: Any, increment: Any) -> bool:
+    """
+    Check that a time control the server sent is one the drum and turret can
+    actually show, so an untrusted payload can never put a value on the chip
+    that the picker cannot carry or a search would be refused for
+
+    :param minutes: minutes per side as the payload carried it
+    :param increment: seconds per move as the payload carried it
+    :returns: True when both land on a chamber and a turret value
+    """
+    return (_is_whole_number(minutes) and minutes in TIMED_MINUTES
+            and _is_whole_number(increment) and increment in INCREMENTS)
 
 
 def _side_image(color: str) -> pg.Surface | None:
@@ -295,8 +321,9 @@ class PlayView(MenuView):
         """
         Build the panel once at startup with the mode from last time and the
         stored default time control already chosen, so the player finds their
-        previous session waiting. No rect is known yet -- the shell lays the
-        menu out before it is ever shown
+        previous session waiting; the applied default is remembered so later
+        visits to Options only touch the panel when it really changed. No rect
+        is known yet -- the shell lays the menu out before it is ever shown
 
         :param app: the Frontend shell, this view's route to the window, sound,
             toasts, the input router and the online coordinator
@@ -309,6 +336,7 @@ class PlayView(MenuView):
         self.selected_time_minutes: int | None = 10
         self.selected_increment_seconds = 5
         self.selected_side = "random"
+        self._applied_defaults: tuple[int | None, int] | None = None
         self.apply_default_time_settings()
 
         self._picker = TimePicker(on_change=self._on_picker_change,
@@ -402,32 +430,77 @@ class PlayView(MenuView):
     def apply_default_time_settings(self) -> None:
         """
         Take the default time control and increment from the stored settings,
-        which is how a change made in Options reaches the panel. Values the
-        drum and turret cannot show are ignored, and an untimed default drops
-        the increment to zero because there is no clock to add it to
+        which is how a change made in Options reaches the panel. It only acts
+        when the stored pair differs from the one last applied, so leaving
+        Options without touching the defaults keeps whatever the player has
+        picked on the panel since. Values the drum and turret cannot show are
+        ignored, an untimed default drops the increment to zero because there
+        is no clock to add it to, and online it falls back to a timed chamber
         """
-        minutes = env.get_default_time_minutes()
-        if minutes in [value for value, _ in CHAMBERS]:
+        stored = (env.get_default_time_minutes(), env.get_default_increment_seconds())
+        if stored == self._applied_defaults:
+            return
+        self._applied_defaults = stored
+        minutes, seconds = stored
+        if minutes is None or minutes in TIMED_MINUTES:
             self.selected_time_minutes = minutes
-        seconds = env.get_default_increment_seconds()
         if seconds in INCREMENTS:
             self.selected_increment_seconds = seconds
         if self.selected_time_minutes is None:
             self.selected_increment_seconds = 0
+        self._ensure_online_timed()
 
     def apply_resume_config(self, resume: dict[str, Any]) -> None:
         """
-        Dress the panel to match a game being rejoined -- online, the same time
-        control, the same side -- so the menu behind the reconnect tells the
-        truth about what the player is going back to
+        Dress the panel to match a game being rejoined -- online, at that
+        game's time control -- so the menu behind the reconnect tells the truth
+        about what the player is going back to. The side chip is the player's
+        own preference for the next search and is left alone, since the colour
+        they hold in the room is not a choice they made. The time control is
+        untrusted and only adopted when the drum and turret can show it
 
         :param resume: the server's resume snapshot, read here for the time
-            control and for which colour this player has
+            control
         """
         self.selected_mode = ONLINE
-        self.selected_time_minutes = resume["time_minutes"]
-        self.selected_increment_seconds = resume["increment_seconds"]
-        self.selected_side = resume["your_color"]
+        minutes, increment = resume.get("time_minutes"), resume.get("increment_seconds")
+        if _valid_timed_control(minutes, increment):
+            self.selected_time_minutes = cast(int, minutes)
+            self.selected_increment_seconds = cast(int, increment)
+        self._ensure_online_timed()
+
+    def _select_mode(self, mode: str) -> None:
+        """
+        Switch the panel to a mode the player picked on a chip. Online has no
+        untimed games, so a drum left on the infinity sign moves to the timed
+        chamber an online search would otherwise fall back to, and the chip
+        then shows exactly what will be sent
+
+        :param mode: the chosen mode, one of the selectable chips
+        """
+        self.selected_mode = mode
+        self._ensure_online_timed()
+
+    def _online_minutes(self) -> int:
+        """
+        Give the minutes an online search would ask for from the current
+        choice, which is the chosen chamber unless the drum is on the untimed
+        one, where the online fallback stands in
+
+        :returns: minutes per side for an online game
+        """
+        if self.selected_time_minutes is None:
+            return ONLINE_DEFAULT_TIME_MINUTES
+        return self.selected_time_minutes
+
+    def _ensure_online_timed(self) -> None:
+        """
+        Keep the panel honest in online mode by moving an untimed choice onto
+        the timed chamber the search would send, so the chip never shows the
+        infinity sign for a game that will have a clock
+        """
+        if self.selected_mode == ONLINE:
+            self.selected_time_minutes = self._online_minutes()
 
     def set_reconnect_available(self, available: bool) -> None:
         """
@@ -456,19 +529,33 @@ class PlayView(MenuView):
     def build_config(self) -> dict[str, Any]:
         """
         Gather every choice made on the panel into the settings block the shell
-        starts a game from. The same block is what the coordinator remembers,
-        so a New Search after a failure repeats exactly this request
+        starts a game from, read fresh each time the start button is pressed.
+        Online the minutes are always a timed chamber, since a game against a
+        live opponent cannot be untimed
 
         :returns: the chosen mode, the player's nickname, the time control as
             minutes plus increment seconds, and the side preference
         """
+        minutes = (self._online_minutes() if self.selected_mode == ONLINE
+                   else self.selected_time_minutes)
         return {
             "mode": self.selected_mode,
             "nickname": env.get_nickname(),
-            "time_minutes": self.selected_time_minutes,
+            "time_minutes": minutes,
             "increment_seconds": self.selected_increment_seconds,
             "side": self.selected_side,
         }
+
+    def build_online_config(self) -> dict[str, Any]:
+        """
+        Gather the panel's choices as an online search request whatever mode
+        chip is lit, which is what the coordinator's New Search starts from: the
+        side and time control are whatever the panel shows now, the mode is
+        online and the minutes are a timed chamber
+
+        :returns: the panel's settings block with the mode forced to online
+        """
+        return {**self.build_config(), "mode": ONLINE, "time_minutes": self._online_minutes()}
 
     def _on_picker_change(self) -> None:
         """
@@ -787,8 +874,10 @@ class PlayView(MenuView):
         """
         Open the revolver time picker on the chip the player just pressed,
         handing it the current choice first so the drum and turret come up
-        already showing it rather than snapping to it
+        already showing it rather than snapping to it. Online the untimed
+        chamber is locked, since the search cannot ask for a game with no clock
         """
+        self._picker.set_untimed_allowed(self.selected_mode != ONLINE)
         self._picker.set_selection(self.selected_time_minutes,
                                    self.selected_increment_seconds)
         self._time_open = True
@@ -897,7 +986,7 @@ class PlayView(MenuView):
                 if locked:
                     self.app.toast.show(COMING_SOON, key=COMING_SOON_KEY)
                 else:
-                    self.selected_mode = key
+                    self._select_mode(key)
                 return True
         if self._time_chip.collidepoint(pos):
             self._open_time_popover()

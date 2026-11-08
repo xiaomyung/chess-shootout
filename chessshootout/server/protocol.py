@@ -105,7 +105,7 @@ def _transit_grace(interval: float) -> float:
 
 
 PROTOCOL_VERSION = 6
-MIN_CLIENT_VERSION = "2.13.0"
+MIN_CLIENT_VERSION = "2.13.2"
 CLIENT_VERSION_MAX_LEN = 32
 MAX_NICKNAME_LEN = 20
 GIVE_TIME_SECONDS = 15
@@ -325,10 +325,13 @@ class HealthStatus:
 
 class IdleWindowSpec(NamedTuple):
     """
-    One row of the idle-window table: what becomes of a game whose side to move
-    has gone silent, and how many seconds of silence are allowed first. Paired
-    with a ply count in IDLE_WINDOW_BY_PLIES, the single source both the sweep
-    and the pushed countdown read
+    One idle window: what becomes of a game whose side to move has gone
+    silent, and how many seconds of silence are allowed first. Paired with a
+    ply count in IDLE_WINDOW_BY_PLIES, which names the outcome both the sweep
+    and the pushed countdown read. `seconds` is the window length: the
+    table's base length in IDLE_WINDOW_BY_PLIES, and the length already fitted
+    to the room's time control by idle_window_seconds in the spec a room
+    hands out for its current ply
     """
 
     outcome: str
@@ -342,6 +345,28 @@ IDLE_WINDOW_BY_PLIES = {
 }
 
 IDLE_SECONDS_BY_OUTCOME = dict(IDLE_WINDOW_BY_PLIES.values())
+
+ABORT_WINDOW_TC_FRACTION = 0.5
+
+
+def idle_window_seconds(outcome: str, initial_seconds: float) -> float:
+    """
+    Say how long a silent side to move gets before the idle window fires, the
+    one rule the server sweep and the client countdown share. An abort window
+    is capped at a fraction of the starting clock, so in bullet it ends well
+    before the clock could flag; any other outcome keeps its table length
+
+    :param outcome: idle-window outcome from IDLE_WINDOW_BY_PLIES, such as
+        aborted or resignation.
+    :param initial_seconds: each side's starting clock in seconds; zero, a
+        negative or a non-finite value means untimed and keeps the base length.
+    :returns: seconds of silence the window allows.
+    """
+    base = float(IDLE_SECONDS_BY_OUTCOME[outcome])
+    if (outcome == Reason.ABORTED and math.isfinite(initial_seconds)
+            and initial_seconds > 0):
+        return min(base, ABORT_WINDOW_TC_FRACTION * initial_seconds)
+    return base
 
 
 def normalize_nickname(raw: str | None) -> str:
@@ -638,8 +663,9 @@ class MatchmakeResponse(_Base):
 class CancelMatchmakeRequest(_Base):
     """
     Withdraws a player who is still waiting to be paired, named by the room they
-    were placed in and their session token. It has no effect once the game has
-    already started
+    were placed in and their session token. A cancel that arrives just after
+    pairing, before any move, calls the game off with no winner; it has no
+    effect once a move has been played
     """
 
     room_id: str

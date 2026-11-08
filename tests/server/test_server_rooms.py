@@ -1,7 +1,9 @@
-import random
-
 import pytest
 
+from chessshootout.backend.backend import Backend
+from chessshootout.backend.utils import square_from_coord
+from chessshootout.server import rooms as rooms_module
+from chessshootout.server.broadcasts import game_start_message
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, IDLE_RESIGN_SECONDS, Reason,
 )
@@ -72,16 +74,6 @@ async def test_enqueue_pairs_only_within_same_time_control(manager):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_resolves_color_conflict_randomly(manager):
-    """Two white-preferring players: the clash is broken by coin flip, but the
-    pair must always come out on opposite colors regardless of the flip."""
-    random.seed(42)
-    await manager.enqueue(**_enqueue_kwargs("alice", side_preference="white"))
-    room = await manager.enqueue(**_enqueue_kwargs("bob", side_preference="white"))
-    assert {room.color_of("alice"), room.color_of("bob")} == {"white", "black"}
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "first_pref, second_pref, alice_color, bob_color",
     [
@@ -89,12 +81,22 @@ async def test_enqueue_resolves_color_conflict_randomly(manager):
                      id="explicit_complementary_sides_honored"),
         pytest.param("black", "random", "black", "white",
                      id="random_takes_opposite_of_explicit"),
+        pytest.param("white", "white", "black", "white",
+                     id="white_clash_goes_to_the_arrival"),
+        pytest.param("black", "black", "white", "black",
+                     id="black_clash_goes_to_the_arrival"),
+        pytest.param("random", "white", "black", "white",
+                     id="waiting_shrug_yields_to_the_arrival"),
     ],
 )
 async def test_enqueue_deterministic_color_resolution(
     manager, first_pref, second_pref, alice_color, bob_color,
 ):
-    """Non-clashing color prefs resolve deterministically (no coin flip)."""
+    """Every pairing with at least one stated side resolves deterministically
+    (no coin flip): a stated preference wins, and when both players asked for
+    the same colour the arriving player gets it. The colour-clash rows used to
+    sit in a test named for a coin flip that never happens -- only two shrugs
+    are left to chance."""
     await manager.enqueue(**_enqueue_kwargs("alice", side_preference=first_pref))
     room = await manager.enqueue(**_enqueue_kwargs("bob", side_preference=second_pref))
     assert room.color_of("alice") == alice_color
@@ -438,7 +440,7 @@ async def test_series_scores_stay_separate_for_two_identical_nicknames(manager):
     await manager.enqueue(**_enqueue_kwargs("alice", nickname="Player"))
     room = await manager.enqueue(**_enqueue_kwargs("bob", nickname="Player"))
     assert room.white.nickname == room.black.nickname == "Player"
-    manager.finalize_result(room.room_id, "draw_agreement", None)
+    manager.finalize_result(room.room_id, "draw_repetition", None)
     assert room.score_for("white") == 0.5
     assert room.score_for("black") == 0.5
     assert sorted(room.series_scores) == sorted(
@@ -520,8 +522,8 @@ async def test_reset_for_rematch_installs_fresh_annotation_stores(manager):
 
 async def test_timeout_with_no_plies_finalizes_as_aborted_draw(manager):
     """User rule: a flag fall before any move landed is nobody's win -- the game
-    aborts with no winner and awards no series points. Resignation at zero plies
-    deliberately KEEPS its winner (an explicit choice, unlike a dead clock)."""
+    aborts with no winner and awards no series points, the same as every other
+    ending reachable before both sides have moved."""
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     assert room.plies_ever == 0
@@ -530,37 +532,129 @@ async def test_timeout_with_no_plies_finalizes_as_aborted_draw(manager):
     assert room.series_scores == {}
 
 
-async def test_timeout_after_a_ply_keeps_its_winner(manager):
+async def test_timeout_after_both_sides_moved_keeps_its_winner(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
-    room.plies_ever = 1
+    room.plies_ever = 2
     manager.finalize_result(room.room_id, "timeout", "white")
     assert room.result == ("timeout", "white")
+    assert room.score_for("white") == 1.0
 
 
-async def test_zero_ply_resignation_keeps_its_winner(manager):
+@pytest.mark.parametrize("plies", [0, 1], ids=["ply_zero", "ply_one"])
+@pytest.mark.parametrize(
+    "reason, winner",
+    [
+        ("timeout", "white"),
+        ("abandonment", "black"),
+        ("resignation", "black"),
+        ("resignation", "white"),
+        ("draw_agreement", None),
+    ],
+)
+async def test_a_pregame_ending_finalizes_as_aborted_and_scores_nothing(
+        manager, plies, reason, winner):
+    """Before both sides have moved (plies_ever 0 or 1) every ending a player
+    can reach -- a flag, a walk-away, a resignation, an agreed draw -- is an
+    abort: no winner, no series point for anybody."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = plies
+    assert manager.finalize_result(room.room_id, reason, winner) is True
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
+    assert room.score_for("white") == 0.0
+    assert room.score_for("black") == 0.0
+
+
+async def test_zero_ply_resignation_finalizes_as_aborted_and_scores_nothing(manager):
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     manager.finalize_result(room.room_id, "resignation", "black")
-    assert room.result == ("resignation", "black")
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
 
 
-async def test_zero_ply_draw_agreement_stays_a_draw(manager):
-    """ZERO_PLY_ABORT_REASONS only covers dead-clock and walk-away (timeout,
-    abandonment); a mutually agreed draw is a deliberate two-sided choice, so a
-    draw_agreement at zero plies is NOT rewritten to aborted. The result stays
-    draw_agreement and _award_series still splits the point +0.5/+0.5, exactly as
-    it would after a full game -- agreeing to a draw before moving is a real draw,
-    not a cancelled game."""
+async def test_zero_ply_draw_agreement_finalizes_as_aborted_and_scores_nothing(manager):
+    """An agreed draw before anyone moved is a cancelled game, not a real draw:
+    it is rewritten to aborted and splits nothing."""
     await manager.enqueue(**_enqueue_kwargs("alice"))
     room = await manager.enqueue(**_enqueue_kwargs("bob"))
     assert room.plies_ever == 0
     manager.finalize_result(room.room_id, "draw_agreement", None)
+    assert room.result == ("aborted", None)
+    assert room.series_scores == {}
+    assert room.score_for("white") == 0.0
+    assert room.score_for("black") == 0.0
+
+
+@pytest.mark.parametrize("plies", [2, 3, 40])
+async def test_a_resignation_after_both_sides_moved_keeps_its_winner(manager, plies):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = plies
+    manager.finalize_result(room.room_id, "resignation", "black")
+    assert room.result == ("resignation", "black")
+    assert room.score_for("black") == 1.0
+    assert room.score_for("white") == 0.0
+
+
+@pytest.mark.parametrize("plies", [2, 3, 40])
+async def test_a_draw_agreement_after_both_sides_moved_splits_the_point(manager, plies):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = plies
+    manager.finalize_result(room.room_id, "draw_agreement", None)
     assert room.result == ("draw_agreement", None)
-    assert room.series_scores[room.white.client_uuid] == 0.5
-    assert room.series_scores[room.black.client_uuid] == 0.5
     assert room.score_for("white") == 0.5
     assert room.score_for("black") == 0.5
+
+
+@pytest.mark.parametrize("plies", [0, 1])
+@pytest.mark.parametrize(
+    "reason, winner",
+    [("checkmate", "white"), ("stalemate", None), ("draw_repetition", None),
+     ("server_shutdown", None)],
+)
+async def test_endings_outside_the_pregame_set_are_never_rewritten(
+        manager, plies, reason, winner):
+    """Only the four pregame reasons are rewritten; any other code (reachable
+    in tests via fabricated positions) is recorded as given."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = plies
+    manager.finalize_result(room.room_id, reason, winner)
+    assert room.result == (reason, winner)
+
+
+async def test_a_pregame_resignation_in_a_rematch_leaves_the_carried_series_untouched(
+        manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    rid = room.room_id
+    white_uuid = room.white.client_uuid
+    room.plies_ever = 30
+    manager.finalize_result(rid, "checkmate", "white")
+    before = dict(room.series_scores)
+    assert before == {white_uuid: 1.0}
+    assert manager.reset_for_rematch(rid) is True
+    room.plies_ever = 1
+    manager.finalize_result(rid, "resignation", "white")
+    assert room.result == ("aborted", None)
+    assert room.series_scores == before
+
+
+async def test_a_takeback_to_an_empty_board_still_counts_as_played(manager):
+    """plies_ever counts every ply ever seen and a takeback never lowers it:
+    after two plies taken back to an empty board, a resignation still scores.
+    Pins the plies_ever predicate deliberately over 'board empty'."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    room.plies_ever = 2
+    assert room.backend is not None and room.backend.move_history == []
+    manager.finalize_result(room.room_id, "resignation", "black")
+    assert room.result == ("resignation", "black")
+    assert room.score_for("black") == 1.0
 
 
 async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
@@ -571,6 +665,33 @@ async def test_zero_ply_abandonment_finalizes_as_aborted_draw(manager):
     manager.finalize_result(room.room_id, "abandonment", "black")
     assert room.result == ("aborted", None)
     assert room.series_scores == {}
+
+
+async def test_is_live_tracks_a_queued_room_a_paired_room_and_a_dropped_room(manager):
+    queued = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert not queued.is_paired()
+    assert manager.is_live(queued) is True
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room is queued
+    assert manager.is_live(room) is True
+    manager.finalize_result(room.room_id, "checkmate", "white")
+    assert manager.is_live(room) is True
+    manager.drop_room_now(room.room_id)
+    assert manager.is_live(room) is False
+
+
+async def test_is_live_is_false_for_a_room_the_manager_never_held(manager):
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.is_live(_bare_room(room_id="stranger")) is False
+
+
+async def test_is_live_is_false_for_a_lookalike_with_a_live_rooms_id(manager):
+    """Identity, not id: a different Room object carrying a registered id is not
+    the live room."""
+    await manager.enqueue(**_enqueue_kwargs("alice"))
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert manager.is_live(_bare_room(room_id=room.room_id)) is False
 
 
 def _bare_room(**overrides):
@@ -657,14 +778,13 @@ async def test_reset_for_rematch_rearms_the_abort_window(manager, clock):
     assert room.idle_window() == (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS)
 
 
-def test_resignation_is_not_a_zero_ply_abort_reason():
-    """ZERO_PLY_ABORT_REASONS must never grow "resignation". The idle forfeit
-    can only fire at plies_ever == 2, so adding it would change nothing for the
-    idle feature — but it would silently flip a HAND resign at zero plies from a
-    resignation with a winner (the deliberate choice pinned by
-    test_zero_ply_resignation_keeps_its_winner) into a no-winner abort."""
-    assert "resignation" not in RoomManager.ZERO_PLY_ABORT_REASONS
-    assert RoomManager.ZERO_PLY_ABORT_REASONS == ("timeout", "abandonment")
+def test_pregame_abort_reasons_are_every_ending_a_player_can_reach_before_a_move():
+    """The pregame rule covers exactly the endings reachable before both sides
+    have moved: a flag, a walk-away, a resignation and an agreed draw. The idle
+    forfeit fires only at plies_ever == 2, so it never meets the rewrite."""
+    assert RoomManager.PREGAME_ABORT_REASONS == frozenset(
+        {"timeout", "abandonment", "resignation", "draw_agreement"})
+    assert "checkmate" not in RoomManager.PREGAME_ABORT_REASONS
 
 
 @pytest.mark.asyncio
@@ -780,3 +900,285 @@ async def test_cancel_wait_removes_the_emptied_bucket(manager):
     room = await manager.enqueue(**_enqueue_kwargs("alice", time_minutes=7))
     await manager.cancel_wait(room.room_id, session_token="tok-alice")
     assert manager._queue == {}
+
+
+@pytest.mark.parametrize("coin, bob_color, alice_color",
+                         [(0, "white", "black"), (1, "black", "white")])
+async def test_two_shrugs_are_settled_by_the_coin_and_still_split_the_colours(
+        manager, monkeypatch, coin, bob_color, alice_color):
+    """Two random preferences are the one pairing left to chance; whichever way
+    the coin lands, the arriving player takes it and the waiter gets the other."""
+    await manager.enqueue(**_enqueue_kwargs("alice", side_preference="random"))
+    monkeypatch.setattr(rooms_module.random, "choice", lambda seq: seq[coin])
+    room = await manager.enqueue(**_enqueue_kwargs("bob", side_preference="random"))
+    assert room.color_of("bob") == bob_color
+    assert room.color_of("alice") == alice_color
+
+
+async def _paired(manager, **overrides):
+    """Alice on white, Bob on black, on whatever time control the overrides set."""
+    await manager.enqueue(**_enqueue_kwargs("alice", side_preference="white", **overrides))
+    return await manager.enqueue(**_enqueue_kwargs("bob", side_preference="black",
+                                                   **overrides))
+
+
+def _play(room, *plies):
+    """Put real plies on the board and count them the way the move handler does."""
+    for frm, to in plies:
+        assert room.backend.try_move(square_from_coord(frm), square_from_coord(to)).legal
+        room.plies_ever += 1
+
+
+def _lookups(manager, uuid):
+    unstarted = manager.unstarted_room_for(uuid)
+    in_progress = manager.in_progress_room_for(uuid)
+    assert unstarted is None or in_progress is None, \
+        "a player is never in an unstarted and an in-progress game at once"
+    return unstarted, in_progress
+
+
+async def test_unstarted_room_for_matches_only_paired_unfinished_unmoved_rooms(manager):
+    """The new-search abort keys on this lookup, so it has to be exactly the
+    paired, unfinished rooms nobody has moved in -- and never overlap the
+    in-progress lookup that forfeits a game instead."""
+    assert _lookups(manager, "alice") == (None, None)
+    queued = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert _lookups(manager, "alice") == (None, None), "a queued waiter is not in a game"
+    room = await manager.enqueue(**_enqueue_kwargs("bob"))
+    assert room is queued
+    for uuid in ("alice", "bob"):
+        assert _lookups(manager, uuid) == (room, None)
+    room.first_move_at = 1.0
+    unstarted, in_progress = _lookups(manager, "alice")
+    assert unstarted is None and in_progress is not None and in_progress[0] is room
+    manager.finalize_result(room.room_id, "checkmate", "white")
+    assert _lookups(manager, "alice") == (None, None), "a finished game is neither"
+    assert manager.reset_for_rematch(room.room_id) is True
+    assert _lookups(manager, "bob") == (room, None), "a restarted rematch is unstarted"
+    manager.drop_room_now(room.room_id)
+    assert _lookups(manager, "bob") == (None, None)
+
+
+async def test_unstarted_seat_by_token_needs_a_seat_token_in_that_very_room(manager):
+    """The cancel-versus-pairing abort is only ever triggered by the seat's own
+    token: a room id with somebody else's token, or a token from another room,
+    finds nothing."""
+    room = await _paired(manager)
+    await manager.enqueue(**_enqueue_kwargs("carol", time_minutes=7))
+    other = await manager.enqueue(**_enqueue_kwargs("dave", time_minutes=7))
+    found = manager.unstarted_seat_by_token(room.room_id, "tok-alice")
+    assert found is not None
+    assert found[0] is room and found[1] is room.white
+    found = manager.unstarted_seat_by_token(room.room_id, "tok-bob")
+    assert found is not None and found[1] is room.black
+    assert manager.unstarted_seat_by_token(room.room_id, "bogus") is None
+    assert manager.unstarted_seat_by_token(room.room_id, "tok-carol") is None
+    assert manager.unstarted_seat_by_token(other.room_id, "tok-alice") is None
+    assert manager.unstarted_seat_by_token("no-such-room", "tok-alice") is None
+    room.first_move_at = 1.0
+    assert manager.unstarted_seat_by_token(room.room_id, "tok-alice") is None, \
+        "a game somebody has moved in cannot be cancelled away"
+    room.first_move_at = None
+    manager.finalize_result(room.room_id, "aborted")
+    assert manager.unstarted_seat_by_token(room.room_id, "tok-alice") is None
+
+
+async def test_unstarted_seat_by_token_ignores_a_room_still_waiting(manager):
+    """A queued room is the ordinary cancel's business, not the abort's."""
+    queued = await manager.enqueue(**_enqueue_kwargs("alice"))
+    assert manager.unstarted_seat_by_token(queued.room_id, "tok-alice") is None
+
+
+@pytest.mark.parametrize(
+    "minutes, plies, expected",
+    [
+        pytest.param(1, 0, (Reason.ABORTED, 30.0), id="bullet_ply_zero_halves"),
+        pytest.param(1, 1, (Reason.ABORTED, 30.0), id="bullet_ply_one_halves"),
+        pytest.param(1, 2, (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+                     id="bullet_resign_window_keeps_its_length"),
+        pytest.param(1, 3, None, id="bullet_ply_three_disarmed"),
+        pytest.param(3, 0, (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+                     id="blitz_ply_zero_full"),
+        pytest.param(5, 1, (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+                     id="blitz_ply_one_full"),
+        pytest.param(5, 2, (Reason.RESIGNATION, IDLE_RESIGN_SECONDS),
+                     id="blitz_resign_window"),
+        pytest.param(180, 1, (Reason.ABORTED, FIRST_MOVE_ABORT_SECONDS),
+                     id="longest_ply_one_full"),
+    ],
+)
+def test_idle_window_is_fitted_to_the_time_control(minutes, plies, expected):
+    """The abort window is min(60 s, half the starting clock): a 1-minute game
+    aborts after 30 s, so the abort is always reachable before any flag, while
+    3 minutes and longer keep the full minute. The resign window never shrinks."""
+    room = _bare_room(time_minutes=minutes)
+    room.plies_ever = plies
+    assert room.idle_window() == expected
+
+
+async def test_a_bullet_abort_window_runs_out_at_thirty_seconds(manager, clock):
+    room = await _paired(manager, time_minutes=1)
+    assert room.idle_since == 0.0
+    assert room.idle_remaining(0.0) == 30.0
+    assert room.idle_timeout_reason(29.9) is None
+    assert room.idle_timeout_reason(30.0) == Reason.ABORTED
+
+
+async def test_running_backend_only_from_the_first_move_on(manager, clock):
+    """The one predicate the sweep and /resume tick through: a fresh pairing is
+    not charged, while a board taken all the way back still is (the takeback
+    re-anchors the clock, so only time since the rewind is charged)."""
+    assert _bare_room().running_backend() is None, "no board, no clock"
+    room = await _paired(manager)
+    assert room.running_backend() is None, "nobody has moved yet"
+    room.first_move_at = clock()
+    assert room.running_backend() is room.backend, "stamped first move"
+    _play(room, ("e2", "e4"))
+    assert room.running_backend() is room.backend
+    room.backend.undo()
+    assert room.backend.move_history == []
+    assert room.running_backend() is room.backend, "an empty board after a takeback runs"
+    _play(room, ("e2", "e4"))
+    room.first_move_at = None
+    assert room.running_backend() is None, "moves on a board with no first-move stamp"
+
+
+async def test_running_backend_keeps_a_flagged_clock_running_so_the_flag_settles(
+        manager, clock):
+    """No flagged term: a flag latched outside the sweep (a /resume tick) must
+    still reach the sweep's game_result and finalize as a timeout."""
+    room = await _paired(manager, time_minutes=1)
+    room.first_move_at = clock()
+    _play(room, ("e2", "e4"), ("e7", "e5"))
+    clock.advance(70)
+    room.backend.tick_clock()
+    assert room.backend.clock.flagged is not None
+    assert room.running_backend() is room.backend
+
+
+async def test_running_backend_is_none_for_a_board_without_a_clock(manager, clock):
+    room = await _paired(manager)
+    room.backend = Backend()
+    room.backend.new_game()
+    room.first_move_at = clock()
+    _play(room, ("e2", "e4"))
+    assert room.backend.clock is None
+    assert room.running_backend() is None
+
+
+async def _ply_two_after_a_slow_first_move(manager, clock, minutes, think):
+    """White thinks `think` seconds over the first move, black replies at once:
+    the ply-2 resign window opens with white's clock at minutes*60 - think."""
+    room = await _paired(manager, time_minutes=minutes)
+    clock.advance(think)
+    _play(room, ("e2", "e4"))
+    room.first_move_at = clock()
+    _play(room, ("e7", "e5"))
+    room.mark_idle_activity(clock())
+    return room
+
+
+async def test_the_resign_badge_is_capped_at_a_clock_that_runs_out_first(manager, clock):
+    """1+0 after a 40 s first move: white has 20 s but the resign window 60 s.
+    The shown countdown follows the clock and reaches zero with the flag, while
+    the window itself -- what the sweep ends the game on -- stays uncapped."""
+    room = await _ply_two_after_a_slow_first_move(manager, clock, 1, 40)
+    start = clock()
+    assert room.idle_window() == (Reason.RESIGNATION, IDLE_RESIGN_SECONDS)
+    assert room.idle_display_remaining(start) == pytest.approx(20.0)
+    assert room.idle_display_remaining(start + 10) == pytest.approx(10.0)
+    assert room.idle_remaining(start + 10) == pytest.approx(50.0)
+    assert room.idle_display_remaining(start + 20) == 0.0
+    assert room.idle_display_remaining(start + 25) == 0.0, "never below zero"
+    assert room.idle_timeout_reason(start + 20) is None, "the outcome is not capped"
+    assert room.backend.clock.white_remaining == pytest.approx(20.0), \
+        "reading the cap never ticks the clock"
+
+
+async def test_the_resign_badge_is_not_capped_when_the_clock_outlasts_it(manager, clock):
+    room = await _ply_two_after_a_slow_first_move(manager, clock, 5, 40)
+    start = clock()
+    assert room.idle_display_remaining(start) == IDLE_RESIGN_SECONDS
+    assert room.idle_display_remaining(start + 10) == room.idle_remaining(start + 10)
+
+
+async def test_an_abort_badge_is_never_capped_by_the_clock(manager, clock):
+    """Only a resign window reads the clock. Even a clock forced below the abort
+    window leaves the abort countdown as it is."""
+    room = await _paired(manager, time_minutes=1)
+    room.first_move_at = clock()
+    _play(room, ("e2", "e4"))
+    room.mark_idle_activity(clock())
+    room.backend.clock.black_remaining = 5.0
+    assert room.idle_window() == (Reason.ABORTED, 30.0)
+    assert room.idle_display_remaining(clock()) == 30.0
+
+
+async def test_the_shown_countdown_is_none_without_a_window_and_uncapped_without_a_board(
+        manager, clock):
+    room = await _paired(manager)
+    room.mark_idle_activity(None)
+    assert room.idle_display_remaining(clock()) is None
+    bare = _bare_room()
+    bare.plies_ever = 2
+    bare.idle_since = 0.0
+    assert bare.idle_display_remaining(10.0) == bare.idle_remaining(10.0) == 50.0
+
+
+@pytest.mark.parametrize(
+    "close",
+    [
+        pytest.param(lambda m, clock, room: m.release_for_new_game("alice"),
+                     id="left_and_searched"),
+        pytest.param(lambda m, clock, room: m.drop_room_now(room.room_id),
+                     id="declined"),
+        pytest.param(lambda m, clock, room: (clock.advance(REMATCH_IDLE_SECONDS),
+                                             m.gc_finished_rooms()),
+                     id="window_expired"),
+    ],
+)
+async def test_a_new_pairing_of_the_same_players_starts_the_series_at_zero(
+        manager, clock, close):
+    """Deck #98, pinned: a series lives only inside one room's rematch chain.
+    However the old room ended, the same two players matched again get a fresh
+    room, a 0-0 series and a start frame that says it is not a rematch."""
+    room = await _paired(manager)
+    room.plies_ever = 10
+    manager.finalize_result(room.room_id, "checkmate", "white")
+    assert room.score_for("white") == 1.0
+    close(manager, clock, room)
+    assert manager.get(room.room_id) is None
+    fresh = await _paired(manager)
+    assert fresh is not room and fresh.room_id != room.room_id
+    assert fresh.series_scores == {}
+    assert fresh.is_rematch is False
+    for color in ("white", "black"):
+        start = game_start_message(fresh, color, clock())
+        assert start.white_score == 0.0 and start.black_score == 0.0
+        assert start.rematch is False
+
+
+async def test_a_rematch_series_accumulates_over_three_games_through_the_swaps(
+        manager, clock):
+    """The other half of the pin: only reset_for_rematch carries a series, and
+    it keeps growing across games while the colours swap underneath it."""
+    room = await _paired(manager)
+    rid = room.room_id
+    room.plies_ever = 10
+    manager.finalize_result(rid, "checkmate", "white")
+    assert manager.reset_for_rematch(rid) is True
+    assert room.color_of("alice") == "black"
+    start = game_start_message(room, "black", clock())
+    assert (start.white_score, start.black_score, start.rematch) == (0.0, 1.0, True)
+    room.plies_ever = 10
+    manager.finalize_result(rid, "draw_repetition")
+    assert manager.reset_for_rematch(rid) is True
+    assert room.color_of("alice") == "white"
+    start = game_start_message(room, "white", clock())
+    assert (start.white_score, start.black_score, start.rematch) == (1.5, 0.5, True)
+    room.plies_ever = 10
+    manager.finalize_result(rid, "resignation", "white")
+    assert manager.reset_for_rematch(rid) is True
+    assert room.series_scores == {"alice": 2.5, "bob": 0.5}
+    start = game_start_message(room, "white", clock())
+    assert (start.white_score, start.black_score) == (0.5, 2.5)

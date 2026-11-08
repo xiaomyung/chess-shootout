@@ -39,13 +39,15 @@ class ClientReason:
     """
     Reason codes the client raises on its own behalf, for the failures the
     server never gets to report: it could not be reached, reconnecting ran out
-    of time, or the room is gone although the server is up. They travel in the
-    same error events as server reasons, so the UI handles one vocabulary
+    of time, the room is gone although the server is up, or the game socket
+    closed while still waiting for the game to start. They travel in the same
+    error events as server reasons, so the UI handles one vocabulary
     """
 
     SERVER_UNREACHABLE = "server_unreachable"
     RECONNECT_FAILED = "reconnect_failed"
     ROOM_LOST = "room_lost"
+    SEARCH_LOST = "search_lost"
 
 
 @dataclass
@@ -711,10 +713,17 @@ class OnlineClient:
         socket, and when it drops mid-game, resume and hold it again. It gives
         up only when the game is over, the player left, the room turns out to
         be gone, or the reconnect window runs out -- and each of those is
-        reported before the session ends
+        reported before the session ends. A socket that closes while the
+        player is still waiting for the game to start is reported as a lost
+        search: there is no game yet to resume, and the server has either let
+        the seat go or is gone itself, so the waiting card must not hang
         """
         try:
             await self._run_ws_session()
+            if self._in_queue and not self._stop.is_set():
+                log.warning("ws closed before the game started room=%s", self._room_id)
+                self._inbound.put(Event("error", {"reason": ClientReason.SEARCH_LOST}))
+                return
             while (not self._stop.is_set() and (self._game_active or self._post_game)
                    and self._session_token is not None):
                 log.info("ws dropped mid-game; attempting reconnect")

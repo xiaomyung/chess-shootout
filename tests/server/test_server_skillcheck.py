@@ -663,6 +663,7 @@ async def test_move_after_expired_pending_bails_when_the_game_finalizes_mid_reso
     # and bail -- never apply a fresh ply onto an already-finalized game.
     room, ws_w, ws_b, frm, to = await capture_room(app, clock, WHEEL)
     await handle_move(app, ws_w, room, "white", move_raw(frm, to))
+    room.plies_ever = 2  # past the pregame rule, so the resignation keeps its winner
     finalizing = _FinalizingWS(app.state.rooms, app.state.connections, room)
     app.state.connections.add(room.room_id, room.black.client_uuid, finalizing)
     clock.advance((online.SKILLCHECK_DEADLINE_MS + 50) / 1000.0)  # expired, unswept

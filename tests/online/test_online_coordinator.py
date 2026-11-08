@@ -27,9 +27,11 @@ from chessshootout.frontend.screens.game import IDLE_RESIGN_NOTICE_SECONDS, Idle
 from chessshootout.online.client import Event, OnlineClient
 from chessshootout.server.protocol import (
     MIN_CLIENT_VERSION, MatchmakeRequest, Reason, client_version_outdated,
+    idle_window_seconds,
 )
 from tests.helpers import (
-    fake_uuid4, make_app, online_start_payload as _online_start_payload,
+    FakeOnlineClient, fake_uuid4, freeze_ticks, make_app,
+    online_start_payload as _online_start_payload, read_source_without_docstrings,
     start_single_screen,
 )
 
@@ -1223,3 +1225,158 @@ def test_a_source_run_states_no_version_and_is_admitted_by_the_gate(monkeypatch)
 
     assert sent[0]["client_version"] == ""
     assert client_version_outdated(sent[0]["client_version"], MIN_CLIENT_VERSION) is False
+
+
+# --- #97 client: the ply-0 abort window and White's clock follow the server rule
+
+@pytest.mark.parametrize("minutes, window", [
+    pytest.param(1, 30.0, id="bullet_1plus0_aborts_at_half_the_clock"),
+    pytest.param(5, 60.0, id="blitz_5plus0_keeps_the_full_minute"),
+])
+def test_match_found_arms_the_abort_window_the_server_uses_for_the_time_control(
+        monkeypatch, minutes, window):
+    """The client used to carry its own copy of the abort rule (a flat 60 s),
+    so in 1+0 the badge promised 60 while the server aborted at 30. Both sides
+    now call idle_window_seconds; the card's hold and the queue delay still
+    come off the window."""
+    app = make_app(1000, 800)
+    ticks = freeze_ticks(monkeypatch)
+    app.coordinator.client = _mock_client()
+    app.coordinator._begin_match_found_transition(_online_start_payload(
+        time_minutes=minutes, started_seconds_ago=4.0))
+    ticks["ms"] += 3000
+
+    app.coordinator._finish_match_found()
+
+    idle = app.game._idle_window
+    assert idle is not None
+    assert idle.outcome == Reason.ABORTED
+    assert idle.total_seconds == window == idle_window_seconds(Reason.ABORTED, minutes * 60)
+    assert idle.deadline_ms == ticks["ms"] + int((window - 7.0) * 1000)
+
+
+def test_match_found_backdates_whites_clock_by_the_time_already_gone(monkeypatch):
+    """The server charges White from pairing, the client's clock used to start
+    full at the end of the match-found card. White's anchor is moved back by
+    the queue delay plus the card hold, so the first tick charges exactly what
+    the server will; Black is untouched and nothing is charged before a tick."""
+    app = make_app(1000, 800)
+    ticks = freeze_ticks(monkeypatch)
+    app.coordinator.client = _mock_client()
+    app.coordinator._begin_match_found_transition(_online_start_payload(
+        time_minutes=1, started_seconds_ago=4.0))
+    ticks["ms"] += 3000
+
+    app.coordinator._finish_match_found()
+
+    clock = app.game.match.clock
+    assert clock is not None
+    assert clock.running_for == PieceColor.WHITE
+    now = clock.now_provider()
+    assert clock.remaining_at(PieceColor.WHITE, now) == pytest.approx(53.0, abs=0.1)
+    assert clock.remaining(PieceColor.WHITE) == 60.0, "nothing is charged until the next tick"
+    assert clock.remaining(PieceColor.BLACK) == 60.0
+
+
+def test_match_found_with_nothing_gone_leaves_whites_clock_where_it_started(monkeypatch):
+    app = make_app(1000, 800)
+    freeze_ticks(monkeypatch)
+    app.coordinator.client = _mock_client()
+    app.coordinator._begin_match_found_transition(_online_start_payload(
+        time_minutes=3, started_seconds_ago=0.0))
+
+    app.coordinator._finish_match_found()
+
+    clock = app.game.match.clock
+    assert clock.remaining_at(PieceColor.WHITE, clock.now_provider()) == pytest.approx(
+        180.0, abs=0.1)
+    assert app.game._idle_window.total_seconds == 60.0
+
+
+def test_the_client_no_longer_carries_its_own_copy_of_the_abort_rule():
+    source = read_source_without_docstrings(coordinator_module.__file__)
+    assert "FIRST_MOVE_ABORT_SECONDS" not in source
+    assert "idle_window_seconds" in source
+
+
+# --- #98: the series leaves with the session, but the closed card keeps it
+
+def test_unbinding_the_board_clears_the_series_while_keeping_the_board_keeps_it():
+    app = _wired_app(white_score=1.0, black_score=0.5)
+
+    app.coordinator._close_session_keep_board("test")
+    assert app.game.result_flow.series_scores == {"white": 1.0, "black": 0.5}
+
+    app.coordinator.unbind_game_from_online()
+    assert app.game.result_flow.series_scores == {}
+    assert app.game._current_round() == 1
+
+
+# --- #99: a batch stops at the handler that ended the session
+
+def test_dropping_the_client_mid_drain_leaves_the_rest_of_the_batch_unapplied(caplog):
+    """Events queued behind a teardown belong to the dead session: a queue
+    timeout that drops the client must not let the idle window and the
+    resyncing toast behind it reach the player."""
+    app = make_app(1000, 800)
+    client = FakeOnlineClient()
+    app.coordinator.client = client
+    handled = []
+    real = app.coordinator._handle_online_event
+
+    def spy(event):
+        handled.append(event.type)
+        real(event)
+
+    app.coordinator._handle_online_event = spy
+    client.queue(Event("error", {"reason": Reason.QUEUE_TIMEOUT}))
+    client.queue(Event("idle_window", {
+        "outcome": Reason.ABORTED, "color": "white", "seconds_remaining": 30.0}))
+    client.queue(Event("connection_status", {"opp_state": "resyncing"}))
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._drain_online_inbound()
+
+    assert handled == ["error"]
+    assert app.coordinator.client is None
+    assert app.toast.message == ONLINE_TRANSIENT_REASON_LABELS[Reason.QUEUE_TIMEOUT]
+    drops = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("online inbound dropped")]
+    assert drops == ["online inbound dropped=2 after session change"]
+
+
+def test_a_batch_that_keeps_its_session_is_applied_whole(caplog):
+    app = make_app(1000, 800)
+    client = FakeOnlineClient()
+    app.coordinator.client = client
+    app.coordinator._start_online_game(_online_start_payload())
+    handled = []
+    real = app.coordinator._handle_online_event
+
+    def spy(event):
+        handled.append(event.type)
+        real(event)
+
+    app.coordinator._handle_online_event = spy
+    for _ in range(3):
+        client.queue(Event("connection_status", {"opp_state": "connected"}))
+
+    with caplog.at_level(logging.DEBUG, logger="chess.frontend"):
+        app.coordinator._drain_online_inbound()
+
+    assert handled == ["connection_status"] * 3
+    assert not any(r.getMessage().startswith("online inbound dropped") for r in caplog.records)
+
+
+def test_the_opponents_name_comes_from_the_pending_pairing_behind_the_card():
+    """While a new pairing waits behind the match-found card, toasts about it
+    must name that opponent, not the one still written on the game screen."""
+    app = _wired_app(white_name="alice", black_name="bob", your_color="white")
+    assert app.coordinator._opp_name() == "bob"
+
+    app.coordinator._begin_match_found_transition(_online_start_payload(
+        your_color="black", white_name="carol", black_name="alice"))
+    assert app.coordinator._opp_name() == "carol"
+
+    app.coordinator._finish_match_found()
+    assert app.coordinator._opp_name() == "carol"

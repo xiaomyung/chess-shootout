@@ -487,10 +487,18 @@ def test_new_matchmake_abandons_in_progress_game(client):
             ws_w.send_text(json.dumps(_move("e2", "e4")))
             ws_w.receive_text()
             ws_b.receive_text()
+            # Black replies so the game is past the pregame rule (a walk-away
+            # before both sides moved is an abort, not an abandonment).
+            ws_b.send_text(json.dumps(_move("e7", "e5")))
+            for _ in range(4):
+                reply = json.loads(ws_b.receive_text())
+                if reply["type"] == "move_applied":
+                    break
+            assert reply["type"] == "move_applied" and reply["san"] == "e5"
             resp = _matchmake(client, uuid=ALICE, nickname="Alice", side="white")
             assert "room_id" in resp
             results = []
-            for _ in range(3):
+            for _ in range(8):
                 msg = json.loads(ws_b.receive_text())
                 if msg["type"] == "result":
                     results.append(msg)

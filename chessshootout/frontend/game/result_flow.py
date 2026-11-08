@@ -36,7 +36,7 @@ RESULT_TEXT = {
     "draw_fifty_move": ("Draw", "by fifty-move rule"),
     "draw_insufficient_material": ("Draw", "by insufficient material"),
     "draw_agreement": ("Draw", "by agreement"),
-    "aborted": ("Game aborted", "the opening was abandoned"),
+    "aborted": ("Game aborted", "called off before both sides moved"),
     "server_shutdown": ("Game cancelled", "server shutting down"),
 }
 
@@ -71,9 +71,9 @@ class ResultFlow:
     def __init__(self, screen: Any) -> None:
         """
         Set the flow up for the life of the game screen. Only the series score
-        is created here, keyed by colour and re-seeded from the server at each
-        game start -- everything else belongs to a single game and is reset
-        for each new one
+        is created here, keyed by colour, cleared at every game start and
+        re-seeded from the server for online ones -- everything else belongs
+        to a single game and is reset for each new one
 
         :param screen: the GameScreen this flow belongs to, and its only route
             to the match, the result card, toasts and the coordinator
@@ -95,12 +95,21 @@ class ResultFlow:
         """
         return self.series_scores.get(color, 0.0)
 
+    def reset_series(self) -> None:
+        """
+        Forget the running online series. The game screen calls this at every
+        game start, before an online start re-seeds it from the server, and
+        the coordinator calls it when the board is cut loose from its session,
+        so an old score never reaches a later round label
+        """
+        self.series_scores = {}
+
     def reset_for_new_game(self) -> None:
         """
         Wipe every per-game latch back to its starting state: the result memo,
         the autosave throttle and file, the save-failure and toast latches and
-        the once-only logging. The series score deliberately survives, since it
-        is what makes a run of online games a series
+        the once-only logging. The series score is left alone, since it is cleared
+        or re-seeded at game start by the screen
         """
         self._result_cache_key: tuple[Any, ...] | None = None
         self._result_cache: str | None = None

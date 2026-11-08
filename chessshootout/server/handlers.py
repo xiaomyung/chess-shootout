@@ -550,8 +550,10 @@ async def handle_resign(app: FastAPI, websocket: WebSocket, room: Room, color: s
                         raw: str) -> str:
     """
     End the game because the sender gave it up, handing the win to their
-    opponent. A game that already has a result is left exactly as it is, so a
-    resignation racing a checkmate cannot rewrite the ending
+    opponent. Before both sides have moved the game is called off instead,
+    with no winner and no point scored. A game that already has a result is
+    left exactly as it is, so a resignation racing a checkmate cannot rewrite
+    the ending
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the resignation arrived on.
@@ -574,8 +576,9 @@ async def handle_draw_offer(app: FastAPI, websocket: WebSocket, room: Room, colo
                             raw: str) -> str:
     """
     Offer the opponent a draw, or accept theirs when they have one standing,
-    which ends the game as agreed. Each side holds at most one offer at a
-    time, and a played move clears it
+    which ends the game as agreed -- or, before both sides have moved, calls
+    it off with no winner and no point scored. Each side holds at most one
+    offer at a time, and a played move clears it
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the offer arrived on.
@@ -603,9 +606,10 @@ async def handle_draw_offer(app: FastAPI, websocket: WebSocket, room: Room, colo
 async def handle_draw_response(app: FastAPI, websocket: WebSocket, room: Room,
                                color: str, raw: str) -> str:
     """
-    Answer the opponent's draw offer: accepting ends the game as a draw,
-    declining simply clears the offer. A player cannot answer their own offer,
-    so the reply always comes from the other side
+    Answer the opponent's draw offer: accepting ends the game as a draw --
+    or, before both sides have moved, calls it off with no winner and no point
+    scored -- and declining simply clears the offer. A player cannot answer
+    their own offer, so the reply always comes from the other side
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -674,9 +678,11 @@ async def handle_rematch_request(app: FastAPI, websocket: WebSocket, room: Room,
     """
     Offer another game once this one has finished, which starts as soon as both
     players have offered and both are still connected. Only a player still
-    sitting on the result screen may offer, a second offer from the same player
-    is refused, and the offer is looked at again after it has been relayed so
-    one withdrawn while the relay was in flight is announced as cancelled
+    sitting on the result screen of a room the server still holds may offer --
+    a room already dropped, by a decline or a reap, answers that the rematch is
+    gone -- a second offer from the same player is refused, and the offer is
+    looked at again after it has been relayed so one withdrawn while the relay
+    was in flight is announced as cancelled
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the offer arrived on.
@@ -690,7 +696,7 @@ async def handle_rematch_request(app: FastAPI, websocket: WebSocket, room: Room,
     if room.result is None:
         return "noop"
     slot = room.slot(color)
-    if slot is None or not slot.at_result:
+    if not rooms.is_live(room) or slot is None or not slot.at_result:
         await send(connections.get_for_color(room, color),
                      ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
                                     msg_type="rematch_request"))
@@ -718,9 +724,10 @@ async def handle_rematch_response(app: FastAPI, websocket: WebSocket, room: Room
     """
     Answer a rematch offer: accepting restarts the room with the colours
     swapped, declining tells both players the window is over and closes the
-    room for good. Answering one's own offer does nothing, and an acceptance
-    while the offerer's socket is away waits for them instead of starting a
-    game one side would never hear about
+    room for good. Answering one's own offer does nothing, an answer to an
+    offer in a room the server has already dropped is told the rematch is
+    gone, and an acceptance while the offerer's socket is away waits for them
+    instead of starting a game one side would never hear about
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -741,6 +748,11 @@ async def handle_rematch_response(app: FastAPI, websocket: WebSocket, room: Room
         return "noop"
     if color in room.rematch_offered_by:
         return "noop"
+    if not rooms.is_live(room):
+        await send(connections.get_for_color(room, color),
+                   ErrorMessage(reason=Reason.REMATCH_UNAVAILABLE,
+                                msg_type="rematch_response"))
+        return "unavailable"
     if msg.accept:
         log.info("rematch accepted room=%s by=%s", room.room_id, color)
         rooms.mark_rematch_activity(room)
@@ -828,11 +840,13 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
     """
     Answer a takeback request: accepting rewinds the position on the server
     and sends the rewound state to both boards, declining just clears the
-    request. An accepted takeback also drops the skill-check record for the
-    ply that was popped, stamps the rewind so a heartbeat still in flight is
-    read as such, and restarts the idle countdown. A takeback that empties the
-    history leaves first_move_at alone -- the room is still a game in progress
-    -- and the sweep is what stops charging a board with nothing on it
+    request. An accepted takeback also restarts the running clock from now,
+    so the side put back on move is not charged for time spent before the
+    rewind, drops the skill-check record for the ply that was popped, stamps
+    the rewind so a heartbeat still in flight is read as such, and restarts
+    the idle countdown. A takeback that empties the history leaves
+    first_move_at alone -- the room is still a game in progress, and its
+    clock keeps charging the side to move from the rewind on
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -858,7 +872,10 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
         backend = cast(Backend, room.backend)
         popped_ply = len(backend.move_history)
         backend.undo()
-        room.note_history_change(app.state.now(), popped_ply)
+        now = app.state.now()
+        if backend.clock is not None:
+            backend.clock.reanchor(now)
+        room.note_history_change(now, popped_ply)
         room.skillcheck_log = [e for e in room.skillcheck_log if e.ply < popped_ply]
         room.takeback_offered_by = None
         room.annotations_white.clear_marks()
@@ -883,7 +900,9 @@ async def handle_give_time(app: FastAPI, websocket: WebSocket, room: Room, color
     Give the opponent clock time as a gift, sized by how long the giver held
     the button down. The hold is turned into whole chunks server-side, so what
     lands on the clock comes from the server's own table rather than from the
-    client's arithmetic
+    client's arithmetic. A gift that lands on the side to move while their
+    resign countdown runs re-sends that countdown at once, since the one shown
+    is capped by their clock and the gift may have raised it
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the gift arrived on.
@@ -912,6 +931,10 @@ async def handle_give_time(app: FastAPI, websocket: WebSocket, room: Room, color
         granted_by=color, seconds_added=added,
         clock=clock_snapshot(room.backend.clock),
     ))
+    window = room.idle_window()
+    if (added > 0 and window is not None and window.outcome == Reason.RESIGNATION
+            and opp_color_str == room.color_to_move()):
+        await push_idle_window(rooms, connections, room, app.state.now(), force=True)
     return "granted" if added > 0 else "capped"
 
 

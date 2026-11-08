@@ -33,7 +33,7 @@ from chessshootout.server.protocol import (
     RESYNC_TRANSIT_GRACE_SECONDS, Reason, WS_CLOSE_INVALID_TOKEN,
     WS_CLOSE_PAYLOAD_TOO_LARGE, WS_CLOSE_SERVER_SHUTDOWN, WS_CLOSE_SUPERSEDED,
 )
-from chessshootout.server.rooms import QUEUE_ABANDON_SECONDS, RoomManager
+from chessshootout.server.rooms import AlreadyInGameError, QUEUE_ABANDON_SECONDS, RoomManager
 from chessshootout.server.sweep import SWEEP_STALE_SECONDS, Sweep
 from chessshootout.server.ws_session import _ws_session
 from tests.helpers import FakeClock, fake_uuid4
@@ -268,20 +268,26 @@ def test_matchmake_admits_every_build_at_or_above_the_floor(client, client_versi
     assert r.status_code == 200
 
 
-def test_an_outdated_request_leaves_the_senders_existing_room_alone(client, app, clock):
+@pytest.mark.parametrize("started", [True, False], ids=["started", "unstarted"])
+def test_an_outdated_request_leaves_the_senders_existing_room_alone(
+        client, app, clock, started):
     """The gate runs before the endpoint's give-up-your-old-seat block, which
     would otherwise abandon (and finalize as a loss) the game this same uuid is
-    already playing. A downgraded or spoofed build must not be a way to end
-    somebody's live game from outside it."""
+    already playing -- or, before anybody has moved, call it off. A downgraded or
+    spoofed build must not be a way to end somebody's game from outside it,
+    started or not."""
     assert _matchmake(client, uuid=ALICE).status_code == 200
     assert _matchmake(client, uuid=BOB).status_code == 200
     rooms = app.state.rooms
     live = list(rooms._active.values())
     assert len(live) == 1, "Alice and Bob are paired into one room"
-    live[0].first_move_at = clock()
-    before = rooms.in_progress_room_for(ALICE)
-    assert before is not None, "the game has started, so it is abandonable"
-    room, color = before
+    room = live[0]
+    if started:
+        room.first_move_at = clock()
+        assert rooms.in_progress_room_for(ALICE) == (room, room.color_of(ALICE)), \
+            "the game has started, so it is abandonable"
+    else:
+        assert rooms.unstarted_room_for(ALICE) is room, "nobody moved, so it is abortable"
 
     refused = client.post("/matchmake", json={
         "version": PROTOCOL_VERSION, "client_uuid": ALICE, "nickname": "Alice",
@@ -290,9 +296,10 @@ def test_an_outdated_request_leaves_the_senders_existing_room_alone(client, app,
     })
 
     assert refused.status_code == 426
-    after = rooms.in_progress_room_for(ALICE)
-    assert after is not None
-    assert after[0] is room and after[1] == color
+    if started:
+        assert rooms.in_progress_room_for(ALICE) == (room, room.color_of(ALICE))
+    else:
+        assert rooms.unstarted_room_for(ALICE) is room
     assert room.result is None, "the refused request finalized nothing"
     assert app.state.rooms.rooms_active == 1
 
@@ -442,12 +449,204 @@ def test_matchmake_model_bounds_subsume_the_removed_hand_checked_floor():
     assert MIN_INCREMENT_SECONDS >= 0
 
 
-def test_matchmake_rejects_already_in_game(client):
+def test_matchmake_from_an_unstarted_pairing_aborts_it_and_queues_the_searcher(
+        client, app, caplog):
+    """A new search from a paired game nobody has moved in used to be answered
+    409 already_in_game until the 60 s abort fired, so Play simply did nothing.
+    The old pairing is now called off with no winner and the searcher is queued
+    straight away."""
     r1 = _matchmake(client, uuid=ALICE)
     r2 = _matchmake(client, uuid=BOB)
     assert r1.status_code == 200 and r2.status_code == 200
-    r3 = _matchmake(client, uuid=ALICE)
-    assert r3.status_code == 409
+    old_id = r1.json()["room_id"]
+    old = app.state.rooms.get(old_id)
+    assert old is not None and old.is_paired()
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        r3 = _matchmake(client, uuid=ALICE)
+    assert r3.status_code == 200
+    assert r3.json()["room_id"] != old_id
+    assert app.state.rooms.get(old_id) is None
+    assert old.result == (Reason.ABORTED, None)
+    assert old.series_scores == {}
+    health = client.get("/healthz").json()
+    assert health["rooms_active"] == 0 and health["queue_depth"] == 1
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert messages.count(f"matchmake aborts room={old_id}") == 1
+    assert not any(m.startswith("matchmake abandons") for m in messages)
+
+
+def test_matchmake_from_the_other_seat_of_an_unstarted_pairing_aborts_it_too(client, app):
+    r1 = _matchmake(client, uuid=ALICE)
+    _matchmake(client, uuid=BOB)
+    old = app.state.rooms.get(r1.json()["room_id"])
+    assert _matchmake(client, uuid=BOB).status_code == 200
+    assert old.result == (Reason.ABORTED, None)
+    assert app.state.rooms.unstarted_room_for(ALICE) is None
+    assert _matchmake(client, uuid=ALICE).status_code == 200, \
+        "the released opponent can search again and pairs with the searcher"
+    assert client.get("/healthz").json()["rooms_active"] == 1
+
+
+def test_matchmake_from_a_restarted_rematch_aborts_without_touching_the_series(
+        client, app):
+    """A rematch both players accepted but nobody has moved in is an unstarted
+    pairing as well: a new search calls it off, and the series carried into it
+    is left exactly as it was -- no point for the abort."""
+    r1 = _matchmake(client, uuid=ALICE)
+    _matchmake(client, uuid=BOB)
+    rooms = app.state.rooms
+    room = rooms.get(r1.json()["room_id"])
+    room.plies_ever = 12
+    rooms.finalize_result(room.room_id, Reason.CHECKMATE, "white")
+    assert rooms.reset_for_rematch(room.room_id) is True
+    snapshot = dict(room.series_scores)
+    assert snapshot == {room.black.client_uuid: 1.0}, "the winner swapped to black"
+
+    assert _matchmake(client, uuid=ALICE).status_code == 200
+
+    assert room.result == (Reason.ABORTED, None)
+    assert room.series_scores == snapshot
+    assert rooms.get(room.room_id) is None
+
+
+def test_matchmake_still_maps_a_racing_already_in_game_to_409(client, app, monkeypatch):
+    """Every seat the caller holds is given up before enqueue now, so 409 is
+    only reachable when something re-seats them in between -- a race. The
+    mapping has to survive for that case."""
+    async def _seated_meanwhile(**_kwargs):
+        raise AlreadyInGameError()
+
+    monkeypatch.setattr(app.state.rooms, "enqueue", _seated_meanwhile)
+    r = _matchmake(client, uuid=ALICE)
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"reason": Reason.ALREADY_IN_GAME}
+
+
+class _HookWS(RecordingWS):
+    """A recording socket that runs `hook` right after it records the first
+    frame of type `trigger` -- the moment the server is inside that await."""
+
+    def __init__(self, trigger, hook):
+        super().__init__()
+        self._trigger = trigger
+        self._hook = hook
+
+    async def send_json(self, payload):
+        await super().send_json(payload)
+        if payload["type"] == self._trigger and self._hook is not None:
+            hook, self._hook = self._hook, None
+            hook()
+
+
+def test_a_rematch_restarted_during_the_leave_notice_keeps_both_seats(
+        client, app, clock):
+    """Race discipline in _leave_finished_room: the room is only let go if it
+    is STILL finished after the opponent_left await. A rematch the opponent
+    accepted in that instant restarted the room, so the searcher stays seated
+    (the 409 is the race answer) instead of tearing a live game out from
+    under both players."""
+    r1 = _matchmake(client, uuid=ALICE)
+    _matchmake(client, uuid=BOB)
+    rooms = app.state.rooms
+    room = rooms.get(r1.json()["room_id"])
+    room.first_move_at = clock()
+    room.plies_ever = 12
+    rooms.finalize_result(room.room_id, Reason.CHECKMATE, "white")
+    bob_ws = _HookWS("rematch_update", lambda: rooms.reset_for_rematch(room.room_id))
+    app.state.connections.add(room.room_id, BOB, bob_ws)
+
+    r = _matchmake(client, uuid=ALICE)
+
+    assert [m["event"] for m in bob_ws.of_type("rematch_update")] == ["opponent_left"]
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"reason": Reason.ALREADY_IN_GAME}
+    assert rooms.get(room.room_id) is room
+    assert room.result is None
+    assert {room.white.client_uuid, room.black.client_uuid} == {ALICE, BOB}
+    assert rooms.unstarted_room_for(ALICE) is room
+    assert rooms.unstarted_room_for(BOB) is room
+
+
+def _cancel(client, room_id, token):
+    return client.request("DELETE", "/matchmake", json={
+        "version": PROTOCOL_VERSION, "room_id": room_id, "session_token": token,
+    })
+
+
+def test_a_cancel_that_races_a_pairing_aborts_the_unstarted_game(client, app, caplog):
+    """The commonest way into an unstarted pairing: the player hits Cancel on the
+    wait card just as an opponent arrives. The cancel used to be answered
+    already_started and the opponent sat facing nobody until the abort window
+    ran out. With the seat's own token it now calls the pairing off and frees
+    both players."""
+    first = _matchmake(client, uuid=ALICE).json()
+    _matchmake(client, uuid=BOB)
+    rooms = app.state.rooms
+    room = rooms.get(first["room_id"])
+    assert room.is_paired()
+    with caplog.at_level(logging.INFO, logger="chess.server.app"):
+        cancel = _cancel(client, first["room_id"], first["session_token"])
+    assert cancel.status_code == 200
+    assert cancel.json() == {"status": "ok"}
+    assert room.result == (Reason.ABORTED, None)
+    assert room.series_scores == {}
+    assert rooms.get(room.room_id) is None
+    assert rooms.unstarted_room_for(BOB) is None
+    messages = [rec.getMessage() for rec in caplog.records]
+    assert messages.count(f"cancel aborts room={room.room_id}") == 1
+    assert _matchmake(client, uuid=ALICE).status_code == 200
+    assert _matchmake(client, uuid=BOB).status_code == 200
+
+
+def test_a_cancel_whose_room_goes_during_the_abort_broadcast_sends_no_leave_notice(
+        client, app):
+    """The DELETE path's own re-check: the opponent let go of the aborted room
+    while the result was being broadcast, so there is no finished room left to
+    walk out of. The cancel still answers ok, and opponent_left is not sent on
+    top of a room that is already gone."""
+    first = _matchmake(client, uuid=ALICE).json()
+    _matchmake(client, uuid=BOB)
+    rooms = app.state.rooms
+    room = rooms.get(first["room_id"])
+    bob_ws = _HookWS("result", lambda: rooms.release_for_new_game(BOB))
+    app.state.connections.add(room.room_id, BOB, bob_ws)
+
+    cancel = _cancel(client, first["room_id"], first["session_token"])
+
+    assert cancel.status_code == 200
+    assert cancel.json() == {"status": "ok"}
+    assert room.result == (Reason.ABORTED, None)
+    assert bob_ws.types() == ["result"]
+    assert rooms.get(room.room_id) is None
+    assert rooms.finished_room_for(ALICE) is None
+    assert _matchmake(client, uuid=ALICE).status_code == 200
+
+
+def test_a_cancel_with_somebody_elses_token_never_aborts_a_pairing(client, app):
+    """Knowing a room id is not enough: a token that matches no seat there --
+    a stale one, a guessed one, one from another room -- leaves the game alone
+    and gets the old already_started answer."""
+    first = _matchmake(client, uuid=ALICE).json()
+    _matchmake(client, uuid=BOB)
+    stranger = _matchmake(client, uuid=fake_uuid4(3), time=7).json()
+    room = app.state.rooms.get(first["room_id"])
+    for token in ("bogus", stranger["session_token"]):
+        cancel = _cancel(client, first["room_id"], token)
+        assert cancel.status_code == 200
+        assert cancel.json() == {"status": "already_started"}
+    assert room.result is None
+    assert app.state.rooms.unstarted_room_for(ALICE) is room
+
+
+def test_a_cancel_after_the_first_move_is_still_already_started(client, app, clock):
+    first = _matchmake(client, uuid=ALICE).json()
+    _matchmake(client, uuid=BOB)
+    room = app.state.rooms.get(first["room_id"])
+    room.first_move_at = clock()
+    cancel = _cancel(client, first["room_id"], first["session_token"])
+    assert cancel.json() == {"status": "already_started"}
+    assert room.result is None
+    assert app.state.rooms.in_progress_room_for(ALICE) is not None
 
 
 def test_matchmake_replaces_the_callers_own_stale_queue_slot(app, client):
@@ -1294,9 +1493,9 @@ async def test_clock_flag_during_play_broadcasts_timeout(app, clock):
     rooms = app.state.rooms
     room = await pair_room(rooms, time_minutes=1)
     room.started_at = clock()
-    play_plies(room, 1)
+    play_plies(room, 2)
     room.first_move_at = clock()
-    room.plies_ever = 1
+    room.plies_ever = 2
     clock.advance(70)
     await _sweep(app)
     assert room.result is not None
@@ -1451,8 +1650,8 @@ async def test_grace_expiry_with_desync_still_awards_opponent(app, clock):
     /resume sets it and only the player's NEXT applied move clears it. The old
     desync branch aborted the game with no winner, so a deliberate leave right
     after a resync robbed the stayer of the abandonment win. Rule: with moves
-    played, a grace expiry ALWAYS awards the opponent; only zero-ply games
-    convert to aborted (finalize_result's central guard). Ply 3 for the same
+    played, a grace expiry ALWAYS awards the opponent; only games ended before
+    both sides moved convert to aborted (finalize_result's central guard). Ply 3 for the same
     reason as the test above: below it the idle window wins the step_all pass."""
     rooms = app.state.rooms
     room = await _paired_in_progress_room(rooms, clock)
@@ -1485,17 +1684,73 @@ async def test_resume_ticks_clock_before_snapshotting(app, client, clock):
     room = await pair_room(rooms)
     room.started_at = clock()
     room.first_move_at = clock()
-    initial_white = room.backend.clock.white_remaining
+    play_plies(room, 1)
+    initial_black = room.backend.clock.black_remaining
     clock.advance(7)
-    r = client.post("/resume", json={
-        "version": PROTOCOL_VERSION,
-        "room_id": room.room_id,
-        "session_token": "ta",
-    })
+    r = _resume(client, room)
     assert r.status_code == 200
     snap = r.json()["clock"]
-    assert snap["white_remaining"] == pytest.approx(initial_white - 7, abs=0.01)
+    assert snap["black_remaining"] == pytest.approx(initial_black - 7, abs=0.01)
+    assert snap["running_for"] == "black"
+
+
+@pytest.mark.asyncio
+async def test_resume_never_charges_white_before_the_first_move(app, client, clock):
+    """/resume ticks through the same Room.running_backend gate as the sweep: before
+    the first move nothing is charged, so a reconnect cannot drain -- or flag --
+    white's clock while the abort window is what governs the board."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    clock.advance(25)
+    snap = _resume(client, room).json()["clock"]
+    assert snap["white_remaining"] == 60.0 and snap["black_remaining"] == 60.0
+    assert room.backend.clock.white_remaining == 60.0
+    assert room.backend.clock.flagged is None
+
+
+@pytest.mark.asyncio
+async def test_resume_charges_a_board_taken_back_to_empty_only_from_the_takeback(
+        app, client, clock):
+    """A board taken all the way back is still a running game: /resume charges
+    the side to move, but only for the time since the takeback re-anchored."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    play_plies(room, 1)
+    room.plies_ever = 1
+    clock.advance(20)
+    room.backend.undo()
+    room.backend.clock.reanchor(clock())
+    room.mark_idle_activity(None)
+    before = (room.backend.clock.white_remaining, room.backend.clock.black_remaining)
+    clock.advance(15)
+    snap = _resume(client, room).json()["clock"]
+    assert snap["white_remaining"] == pytest.approx(before[0] - 15)
+    assert snap["black_remaining"] == before[1]
     assert snap["running_for"] == "white"
+    assert room.backend.clock.flagged is None
+
+
+@pytest.mark.asyncio
+async def test_resume_reports_the_bullet_abort_window_at_its_halved_length(
+        app, client, clock):
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    clock.advance(10)
+    idle = _resume(client, room).json()["idle_window"]
+    assert idle["outcome"] == Reason.ABORTED
+    assert idle["seconds_remaining"] == pytest.approx(20.0)
+
+
+@pytest.mark.asyncio
+async def test_resume_reports_the_resign_window_capped_at_the_movers_clock(
+        app, client, clock):
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    clock.advance(40)
+    room.first_move_at = clock()
+    play_plies(room, 2)
+    room.plies_ever = 2
+    room.mark_idle_activity(clock())
+    idle = _resume(client, room).json()["idle_window"]
+    assert idle["outcome"] == Reason.RESIGNATION
+    assert idle["seconds_remaining"] == pytest.approx(20.0)
 
 
 async def _resumable_room(app, clock):

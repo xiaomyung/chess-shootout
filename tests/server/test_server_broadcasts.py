@@ -15,7 +15,9 @@ import os
 import pytest
 
 import chessshootout
-from chessshootout.server.broadcasts import finalize_and_broadcast, push_idle_window
+from chessshootout.backend.utils import square_from_coord
+from chessshootout.server.broadcasts import (
+    finalize_and_broadcast, idle_window_wire, push_idle_window)
 from chessshootout.server.connections import broadcast
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason, ResultMessage
 from chessshootout.server.rooms import RoomManager
@@ -60,6 +62,7 @@ async def test_losing_finalize_race_does_not_double_broadcast(app, clock):
     connections = app.state.connections
     room = await pair_room(rooms)
     room.first_move_at = clock()
+    room.plies_ever = 2
     racing_white = _RacingWS(rooms, connections, room)
     ws_black = RecordingWS()
     connections.add(room.room_id, room.white.client_uuid, racing_white)
@@ -280,3 +283,68 @@ async def test_a_zero_ply_abort_logs_the_rewritten_reason_and_the_wait(
         f"game finalized room={room.room_id} reason={Reason.ABORTED} winner=none "
         f"plies=0 duration_s=45.2"
     ]
+
+
+async def _idle_room(app, clock, *, minutes, increment=0, think=0.0, plies=2):
+    """A wired room at `plies` with its idle window armed now, white having
+    spent `think` seconds over the first move and black replying at once."""
+    rooms = app.state.rooms
+    room = await pair_room(rooms, time_minutes=minutes, increment_seconds=increment)
+    for index, (frm, to) in enumerate((("e2", "e4"), ("e7", "e5"))[:plies]):
+        if index == 0:
+            clock.advance(think)
+            room.first_move_at = clock()
+        assert room.backend.try_move(square_from_coord(frm), square_from_coord(to)).legal
+        room.plies_ever += 1
+    room.mark_idle_activity(clock())
+    return room
+
+
+@pytest.mark.asyncio
+async def test_the_ply_two_wire_reads_the_clock_when_it_binds(app, clock):
+    """Deck #97: 1+0 after a 40 s first move, white has 20 s left but the resign
+    window is 60 s. The countdown on the wire is the clock, so the badge reaches
+    zero with the flag -- while the window the sweep ends the game on stays
+    uncapped, and the flag still wins."""
+    room = await _idle_room(app, clock, minutes=1, think=40.0)
+    wire = idle_window_wire(room, clock())
+    assert wire.outcome == Reason.RESIGNATION and wire.color == "white"
+    assert wire.seconds_remaining == pytest.approx(20.0)
+    clock.advance(20)
+    assert idle_window_wire(room, clock()).seconds_remaining == 0.0
+    assert room.idle_timeout_reason(clock()) is None
+
+
+@pytest.mark.asyncio
+async def test_the_ply_two_wire_keeps_the_window_when_the_clock_outlasts_it(app, clock):
+    room = await _idle_room(app, clock, minutes=5, think=40.0)
+    assert idle_window_wire(room, clock()).seconds_remaining == 60.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("plies", [0, 1])
+@pytest.mark.parametrize("increment", [0, 2])
+async def test_the_bullet_abort_wire_counts_from_thirty(app, clock, plies, increment):
+    """Plies 0 and 1 at 1+X carry the halved abort window, and the clock never
+    caps an abort; the increment does not change the window."""
+    room = await _idle_room(app, clock, minutes=1, increment=increment, plies=plies)
+    wire = idle_window_wire(room, clock())
+    assert wire.outcome == Reason.ABORTED
+    assert wire.seconds_remaining == 30.0
+    clock.advance(10)
+    assert idle_window_wire(room, clock()).seconds_remaining == 20.0
+
+
+@pytest.mark.asyncio
+async def test_push_idle_window_sends_the_capped_value_to_both_players(app, clock):
+    room = await _idle_room(app, clock, minutes=1, think=40.0)
+    connections = app.state.connections
+    ws_w, ws_b = RecordingWS(), RecordingWS()
+    connections.add(room.room_id, room.white.client_uuid, ws_w)
+    connections.add(room.room_id, room.black.client_uuid, ws_b)
+    clock.advance(5)
+    await push_idle_window(app.state.rooms, connections, room, clock(), force=True)
+    for ws in (ws_w, ws_b):
+        [frame] = ws.of_type("idle_window")
+        assert frame["outcome"] == Reason.RESIGNATION
+        assert frame["seconds_remaining"] == pytest.approx(15.0)

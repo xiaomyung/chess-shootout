@@ -51,6 +51,28 @@ STAT_SLOT_PING = 10
 KEY_REPEAT_DELAY_MS = 400
 KEY_REPEAT_INTERVAL_MS = 35
 
+MINIMIZED_TARGET_FPS = 20
+
+FORFEIT_SEARCH_TITLE = "Abandon your duel?"
+FORFEIT_SEARCH_SUB = ("Your unfinished game is still out there. A new search ends it: "
+                      "called off if you both had not moved yet, otherwise your opponent "
+                      "takes the win.")
+FORFEIT_SEARCH_YES = "Search anyway"
+FORFEIT_SEARCH_NO = "Cancel"
+FORFEIT_SEARCH_EMOJI = "⚔️"
+
+
+def _clamped_window_size(size: tuple[int, int]) -> tuple[int, int]:
+    """
+    Raise a window size to the smallest one the interface can be laid out
+    in. A minimized window reports a tiny size, or none at all, and nothing
+    in the layout may ever be measured against that
+
+    :param size: width and height in pixels as the window reported them
+    :returns: the same size with each side raised to its minimum
+    """
+    return max(size[0], MIN_WINDOW_WIDTH), max(size[1], MIN_WINDOW_HEIGHT)
+
 
 def _stat_slot(label: str, value: int | str, width: int) -> str:
     """
@@ -126,6 +148,10 @@ class Frontend:
         self.settings = SettingsController(self)
         self.chrome = WindowChrome(self.window, on_fullscreen=self._apply_fullscreen)
         self.pacer = FramePacer(self.target_fps)
+        self._idle_pacer = FramePacer(MINIMIZED_TARGET_FPS)
+        self._reported_minimized = False
+        self._minimized = False
+        self._woke = False
 
         self._needs_full_present = True
         self._last_layout_size: tuple[int, int] | None = None
@@ -326,8 +352,28 @@ class Frontend:
 
     def _on_start_game(self, config: dict[str, Any]) -> None:
         """
-        Act on the Play panel's start button. The chosen mode and nickname are
-        stored first so the next launch opens the same way; an online game
+        Act on the Play panel's start button. An online search while a game
+        is still waiting to be rejoined would forfeit that game, so the player
+        is asked first and nothing happens unless they confirm; every other
+        start goes ahead at once
+
+        :param config: the Play panel's settings: mode, nickname, side and the
+            time control as minutes plus increment seconds
+        """
+        if config["mode"] == ONLINE and self.coordinator.reconnect_available():
+            log.debug("search asks before forfeiting a reclaimable game")
+            self.confirm_modal.show(
+                FORFEIT_SEARCH_TITLE, on_yes=lambda: self._start_game(config),
+                sub=FORFEIT_SEARCH_SUB, yes_label=FORFEIT_SEARCH_YES,
+                no_label=FORFEIT_SEARCH_NO, danger=True, emoji=FORFEIT_SEARCH_EMOJI,
+            )
+            return
+        self._start_game(config)
+
+    def _start_game(self, config: dict[str, Any]) -> None:
+        """
+        Start whatever the Play panel asked for. The chosen mode and nickname
+        are stored first so the next launch opens the same way; an online game
         then hands over to the coordinator to go and find an opponent, while a
         local one settles the side -- resolving a random pick here -- and
         opens the game screen straight away
@@ -365,28 +411,13 @@ class Frontend:
     def run(self) -> None:
         """
         The game's main loop, entered once at launch and left only when the
-        player quits. Every pass pumps input, runs whatever screen change that
-        asked for, draws the frame, waits out the frame budget and presents.
-        On the way out each screen gets to flush unsaved work first, before
-        the online connection is dropped and pygame is shut down
+        player quits, running one frame per pass. On the way out each screen
+        gets to flush unsaved work first, before the online connection is
+        dropped and pygame is shut down
         """
         self.menu.enter()
         while self.running:
-            frame_start = time.perf_counter()
-            if self._last_frame_start is not None:
-                self._frame_times.append((frame_start - self._last_frame_start) * 1000.0)
-            self._last_frame_start = frame_start
-            had_events = self.input_router.check_events()
-            self._execute_pending_nav()
-            self.draw_frame()
-            self._execute_pending_nav()
-            self.chrome.draw(self._chrome_stats())
-            work_before_present = time.perf_counter() - frame_start
-            self.pacer.wait()
-            present_start = time.perf_counter()
-            self._present(had_events)
-            self._last_work_ms = (
-                work_before_present + time.perf_counter() - present_start) * 1000.0
+            self._run_frame()
 
         for screen in self.screens.values():
             screen.on_app_exit()
@@ -395,6 +426,132 @@ class Frontend:
         self.chrome.shutdown()
         cache.clear_all()
         pg.quit()
+
+    def _run_frame(self) -> None:
+        """
+        Run one pass of the main loop: pump input, run whatever screen change
+        that asked for, catch the window being minimized or restored, draw the
+        frame, then wait out the frame budget and present. A minimized window
+        still draws every frame, so animations finish, premoves fire and the
+        online heartbeat keeps going, but nothing is presented and the loop
+        idles at a low rate instead. Input arriving anyway is taken as proof
+        the window can be seen, and that frame is presented as usual
+        """
+        frame_start = time.perf_counter()
+        had_events = self.input_router.check_events()
+        self._execute_pending_nav()
+        self._track_minimized()
+        self.draw_frame()
+        self._execute_pending_nav()
+        if self._minimized and not had_events:
+            self._last_frame_start = None
+            self._idle_pacer.wait()
+            return
+        if self._last_frame_start is not None:
+            self._frame_times.append((frame_start - self._last_frame_start) * 1000.0)
+        self._last_frame_start = frame_start
+        self.chrome.draw(self._chrome_stats())
+        work_before_present = time.perf_counter() - frame_start
+        self.pacer.wait()
+        present_start = time.perf_counter()
+        self._present(had_events)
+        self._last_work_ms = (
+            work_before_present + time.perf_counter() - present_start) * 1000.0
+
+    def _window_minimized(self) -> bool:
+        """
+        Ask the system whether the window is minimized right now, or otherwise
+        out of sight, which is when there is no point presenting a frame and
+        no real size to lay the interface out for
+
+        :returns: True while the window cannot be seen
+        """
+        return not pg.display.get_active()
+
+    def _effectively_minimized(self) -> bool:
+        """
+        Decide whether the window should be treated as minimized when sizing
+        the drawing surface: the system says so and no window event has since
+        proved it visible. A woken window is sized like a visible one even
+        while a stuck system flag still reports it minimized, so its surface
+        keeps following the real window
+
+        :returns: True while the window is minimized and has not woken since
+        """
+        return self._window_minimized() and not self._woke
+
+    def _track_minimized(self) -> None:
+        """
+        Compare the window's minimized state with last frame's reading and
+        act on a change: going down stops presenting, coming back puts the
+        window right again. Checked once per frame
+        """
+        reported = self._window_minimized()
+        if reported and not self._reported_minimized:
+            self._on_minimized()
+        elif not reported and self._reported_minimized:
+            self._reconcile_after_restore()
+        self._reported_minimized = reported
+
+    def _on_minimized(self) -> None:
+        """
+        Note that the window has just been minimized, so the frames that
+        follow are drawn but no longer presented
+        """
+        self._minimized = True
+        self._woke = False
+        log.debug("window minimized")
+
+    def _on_window_wake(self) -> None:
+        """
+        Take a window event that only a visible window gets -- restored,
+        shown, exposed or focused -- as proof the window can be seen again,
+        and go back to presenting even if the system still reports it
+        minimized, so a state flag that never clears cannot freeze the screen
+        on its last frame. The window is put right exactly as on a real
+        restore, and from then on its surface keeps following the real window
+        size until the next minimize. A wake whose flag has already cleared is
+        left to the per-frame check, which reconciles that restore once in
+        this same frame. The router calls this for each such event
+        """
+        if not self._minimized or not self._window_minimized():
+            return
+        log.debug("window woke while still reported minimized")
+        self._reconcile_after_restore()
+        self._woke = True
+
+    def _reconcile_after_restore(self) -> None:
+        """
+        Put the window right after it comes back from being minimized: grow
+        the drawing surface back to the real window size if it was left at
+        the minimized size, lay everything out again whether or not the size
+        changed, since some cards were measured against the shrunken surface,
+        and present the next frame whole. Fullscreen keeps the surface the
+        system gave it, because remaking it here would drop fullscreen
+        """
+        self._minimized = False
+        self._woke = False
+        if self.chrome.is_fullscreen():
+            target = _clamped_window_size(self.window.get_size())
+        else:
+            target = _clamped_window_size(self._os_window_size())
+            if target != self.window.get_size():
+                self._recreate_window_surface(*target)
+        self.screen.on_resize()
+        self._finish_resize(*target)
+        self._needs_full_present = True
+        log.debug("window restored size=%dx%d", target[0], target[1])
+
+    def _os_window_size(self) -> tuple[int, int]:
+        """
+        The size the window really is, asked of Windows directly where that
+        is possible and of SDL everywhere else. A minimized window can answer
+        with a tiny size or a zero one, so callers must not lay out from it
+        unchecked
+
+        :returns: width and height in pixels as the system reports them
+        """
+        return self.chrome.client_size() or pg.display.get_window_size()
 
     def _current_fps(self) -> float:
         """
@@ -515,17 +672,36 @@ class Frontend:
         self.chrome.window = self.window
         self.chrome.reinit_sdl()
 
+    def _on_videoresize(self, w: int, h: int) -> None:
+        """
+        Settle a resize the system announced. The size is raised to the
+        interface's minimum, and the drawing surface is remade at that size
+        on Windows, or whenever the floor changed it -- but never while the
+        window is minimized and has not woken since, since a minimized window
+        cannot be grown and the restore puts the surface right anyway. The
+        screen hears about the new surface before anything is measured
+        against it
+
+        :param w: window width in pixels the event reported
+        :param h: window height in pixels the event reported
+        """
+        clamped = _clamped_window_size((w, h))
+        if not self._effectively_minimized() and (os.name == "nt" or clamped != (w, h)):
+            self._recreate_window_surface(*clamped)
+        self.screen.on_resize()
+        self._finish_resize(*clamped)
+
     def _finish_resize(self, w: int, h: int) -> None:
         """
         Settle the app after the window has changed size: record the new size,
-        cancel every scroll that was mid-drag over content which has just
-        moved, and lay the whole interface out again
+        raised to the interface's minimum, cancel every scroll that was
+        mid-drag over content which has just moved, and lay the whole
+        interface out again
 
         :param w: new window width in pixels
         :param h: new window height in pixels
         """
-        self.window_width = w
-        self.window_height = h
+        self.window_width, self.window_height = _clamped_window_size((w, h))
         self.input_router._cancel_all_scroll()
         self._compute_layout()
 
@@ -533,12 +709,14 @@ class Frontend:
         """
         On Windows, reconcile the drawing surface with the size the borderless
         window really ended up at during startup, which can differ from the
-        size that was asked for. A no-op on every other platform
+        size that was asked for. The recorded size never drops below the
+        interface's minimum, even for a game launched minimized. A no-op on
+        every other platform
         """
         if os.name != "nt" or self.chrome.client_size() is None:
             return
         self._recreate_window_surface(self.window_width, self.window_height)
-        self.window_width, self.window_height = self.window.get_size()
+        self.window_width, self.window_height = _clamped_window_size(self.window.get_size())
         self._compute_layout()
 
     def _sync_window_surface(self) -> None:
@@ -546,11 +724,17 @@ class Frontend:
         Keep the drawing surface the same size as the borderless window while
         it is being dragged by an edge on Windows, where resize events do not
         arrive during the drag. Checked every frame, acted on only once the
-        two have actually drifted apart
+        two have actually drifted apart. A minimized window that has not woken
+        since, or one reporting no area at all, is left alone: its size means
+        nothing, and remaking the surface every frame against it would only
+        fight the system
         """
-        size = self.chrome.client_size() or pg.display.get_window_size()
-        win_w = max(size[0], MIN_WINDOW_WIDTH)
-        win_h = max(size[1], MIN_WINDOW_HEIGHT)
+        if self._effectively_minimized():
+            return
+        size = self._os_window_size()
+        if size[0] <= 0 or size[1] <= 0:
+            return
+        win_w, win_h = _clamped_window_size(size)
         if (win_w, win_h) != self.window.get_size():
             if os.environ.get("CHESS_DEBUG_RESIZE"):
                 log.debug("resize-sync win32=%s gws=%s surf=%s -> set_mode(%d,%d)",
@@ -634,10 +818,8 @@ class Frontend:
         sizes = pg.display.get_desktop_sizes()
         if not sizes:
             return
-        w = max(sizes[0][0], MIN_WINDOW_WIDTH)
-        h = max(sizes[0][1], MIN_WINDOW_HEIGHT)
-        self._recreate_window_surface(w, h)
-        self.window_width, self.window_height = self.window.get_size()
+        self._recreate_window_surface(*_clamped_window_size(sizes[0]))
+        self.window_width, self.window_height = _clamped_window_size(self.window.get_size())
 
     def _settle_maximized(self) -> None:
         """
@@ -647,9 +829,7 @@ class Frontend:
         size = self.chrome.client_size()
         if size is None:
             return
-        w = max(size[0], MIN_WINDOW_WIDTH)
-        h = max(size[1], MIN_WINDOW_HEIGHT)
-        self._recreate_window_surface(w, h)
+        self._recreate_window_surface(*_clamped_window_size(size))
         self._finish_resize(*self.window.get_size())
 
     def _apply_fullscreen(self, enable: bool) -> bool:
@@ -682,10 +862,13 @@ class Frontend:
         included so none of them is ever caught with stale geometry. Run at
         startup, on every window resize and on every screen switch. A size
         that really changed also clears the caches keyed by size, since every
-        surface in them was drawn for the old one
+        surface in them was drawn for the old one. The layout is always made
+        for at least the minimum window size, whatever the surface reports,
+        so a minimized window can never hand any screen a size it cannot lay
+        out
         """
-        window_width, window_height = self.window.get_size()
-        size = (window_width, window_height)
+        size = _clamped_window_size(self.window.get_size())
+        window_width, window_height = size
         if size != self._last_layout_size:
             self._last_layout_size = size
             cache.clear_size_keyed()

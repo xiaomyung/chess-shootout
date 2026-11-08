@@ -18,19 +18,21 @@ import json
 import pytest
 
 from chessshootout.backend.utils import square_from_coord
-from chessshootout.server.broadcasts import IDLE_WINDOW_PUSH_MIN_INTERVAL_SECONDS
+from chessshootout.server.broadcasts import (
+    IDLE_WINDOW_PUSH_MIN_INTERVAL_SECONDS, idle_window_wire,
+)
 from chessshootout.server.handlers import HANDLERS, IDLE_ACTIVITY_TYPES, dispatch
 from chessshootout.server.protocol import (
     FIRST_MOVE_ABORT_SECONDS, IDLE_RESIGN_SECONDS, PROTOCOL_VERSION, Reason,
 )
 from chessshootout.server.rooms import PendingSkillCheck
 from chessshootout.skillcheck.types import SkillCheckKind
-from tests.server.conftest import RecordingWS, pair_room
+from tests.server.conftest import BOB, RecordingWS, pair_room
 
 
-async def _wired_room(app):
+async def _wired_room(app, *, time_minutes=5):
     rooms = app.state.rooms
-    room = await pair_room(rooms)
+    room = await pair_room(rooms, time_minutes=time_minutes)
     ws_w, ws_b = RecordingWS(), RecordingWS()
     app.state.connections.add(room.room_id, room.white.client_uuid, ws_w)
     app.state.connections.add(room.room_id, room.black.client_uuid, ws_b)
@@ -264,10 +266,12 @@ async def test_an_accepted_takeback_at_ply_one_restamps_the_abort_window(app, cl
         assert push["seconds_remaining"] == pytest.approx(FIRST_MOVE_ABORT_SECONDS)
 
 
-async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
-    """REGRESSION: an empty board kept charging the side to move -- at a short
-    time control the pair could flag before either had played. The sweep is
-    what stops it: no plies, no tick. first_move_at deliberately STAYS set,
+async def test_a_takeback_of_the_only_move_still_ends_in_an_abort(app, clock):
+    """REGRESSION: an empty board once kept charging the side to move from the
+    pre-takeback anchor -- at a short time control the pair could flag before
+    either had played. The takeback re-anchors, so the clock charges only from
+    the rewind, and the ply-1 abort window (half the clock at most) ends the
+    game with no winner before any flag. first_move_at deliberately STAYS set,
     because clearing it told in_progress_room_for, heartbeat_timed_out_rooms
     and step_drop_orphans_pre_game that a live room was still pre-game."""
     room, ws_w, ws_b = await _wired_room(app)
@@ -281,12 +285,15 @@ async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
     assert room.first_move_at is not None
     assert app.state.rooms.in_progress_room_for(room.white.client_uuid) == (room, "white")
     assert not room.backend.move_history
-    remaining = (room.backend.clock.white_remaining, room.backend.clock.black_remaining)
+    white_before = room.backend.clock.white_remaining
+    black_before = room.backend.clock.black_remaining
     clock.advance(FIRST_MOVE_ABORT_SECONDS + 1)
     await app.state.sweep.step_clock_and_idle_windows()
 
-    assert (room.backend.clock.white_remaining,
-            room.backend.clock.black_remaining) == remaining
+    assert room.backend.clock.white_remaining == pytest.approx(
+        white_before - (FIRST_MOVE_ABORT_SECONDS + 1))
+    assert room.backend.clock.black_remaining == black_before
+    assert room.backend.clock.flagged is None
     assert room.result == (Reason.ABORTED, None)
 
 
@@ -397,7 +404,7 @@ async def test_answering_your_own_draw_offer_is_refused_as_self(app, clock):
 
 
 async def test_an_accepted_draw_ends_the_game_by_agreement(app, clock):
-    room, ws_w, ws_b = await _wired_room(app)
+    room, ws_w, ws_b = await _room_at_ply_two(app)
     await dispatch(app, ws_w, room, "white", _msg(type="draw_offer"))
 
     _, outcome = await dispatch(app, ws_b, room, "black",
@@ -405,6 +412,26 @@ async def test_an_accepted_draw_ends_the_game_by_agreement(app, clock):
 
     assert outcome == "accepted"
     assert room.result == (Reason.DRAW_AGREEMENT, None)
+
+
+@pytest.mark.parametrize("plies", [0, 1], ids=["ply_zero", "ply_one"])
+async def test_an_accepted_draw_before_both_sides_moved_is_an_abort(app, clock, plies):
+    """The pregame rule reaches the real handler path: a draw agreed before both
+    sides have moved is broadcast as aborted and splits no point."""
+    room, ws_w, ws_b = await _wired_room(app)
+    if plies:
+        await _move(app, room, ws_w, "white", "e2", "e4")
+    assert room.plies_ever == plies
+    await dispatch(app, ws_w, room, "white", _msg(type="draw_offer"))
+
+    _, outcome = await dispatch(app, ws_b, room, "black",
+                                _msg(type="draw_response", accept=True))
+
+    assert outcome == "accepted"
+    assert room.result == (Reason.ABORTED, None)
+    assert room.series_scores == {}
+    for ws in (ws_w, ws_b):
+        assert [m["reason"] for m in ws.of_type("result")] == [Reason.ABORTED]
 
 
 async def test_a_declined_draw_clears_the_offer_and_plays_on(app, clock):
@@ -507,3 +534,237 @@ async def test_a_draw_response_during_a_held_check_still_parses_first(app, clock
     assert outcome == "invalid"
     assert room.draw_offered_by == "black", "the offer survives the refusal"
     assert room.pending_skillcheck is not None, "and the held check is untouched"
+
+
+def _gift(hold_ms=0):
+    return _msg(type="give_time", hold_ms=hold_ms)
+
+
+def _after(ws, before_type, after_type):
+    types = ws.types()
+    return types.index(before_type) < max(
+        i for i, t in enumerate(types) if t == after_type)
+
+
+async def test_a_gift_to_the_side_on_the_resign_hook_force_pushes_the_countdown(
+    app, clock,
+):
+    """The ply-2 badge is capped by the idler's live clock, so a gift that
+    raises that clock can raise the countdown too -- the client only learns it
+    from a fresh push. The throttle is armed right before the gift, so only a
+    FORCED push gets through; exactly one goes out to each socket, after the
+    time_granted frame, carrying whatever the shared wire builder says now."""
+    room, ws_w, ws_b = await _wired_room(app, time_minutes=1)
+    clock.advance(20)
+    await _move(app, room, ws_w, "white", "e2", "e4")
+    await _move(app, room, ws_b, "black", "e7", "e5")
+    clock.advance(10)
+    room.backend.tick_clock()
+    armed_at = room.idle_since
+    room.note_idle_push(clock())
+    before = {id(ws): len(ws.of_type("idle_window")) for ws in (ws_w, ws_b)}
+
+    _, verdict = await dispatch(app, ws_b, room, "black", _gift())
+
+    assert verdict == "granted"
+    assert room.backend.clock.white_remaining == pytest.approx(45.0)
+    expected = idle_window_wire(room, clock())
+    assert expected is not None
+    for ws in (ws_w, ws_b):
+        pushes = ws.of_type("idle_window")
+        assert len(pushes) == before[id(ws)] + 1, "exactly one push per gift"
+        assert pushes[-1]["outcome"] == Reason.RESIGNATION
+        assert pushes[-1]["color"] == "white"
+        assert pushes[-1]["seconds_remaining"] == pytest.approx(
+            expected.seconds_remaining)
+        assert _after(ws, "time_granted", "idle_window"), \
+            "the countdown follows the clock it is capped by"
+    assert room.idle_since == armed_at, "a gift never restarts the window itself"
+
+
+async def test_a_gift_to_the_side_off_the_hook_pushes_no_countdown(app, clock):
+    """The side to move gives the waiting side time: the waiting side has no
+    countdown to raise. The dispatch touch hook does restamp the giver's own
+    window (they are on the hook), but its push is the throttled kind, so with
+    the throttle armed nothing at all goes out."""
+    room, ws_w, ws_b = await _wired_room(app)
+    await _move(app, room, ws_w, "white", "e2", "e4")
+    clock.advance(10)
+    await _move(app, room, ws_b, "black", "e7", "e5")
+    room.note_idle_push(clock())
+    before = len(ws_b.of_type("idle_window"))
+
+    _, verdict = await dispatch(app, ws_w, room, "white", _gift())
+
+    assert verdict == "granted"
+    assert ws_b.of_type("time_granted")
+    assert len(ws_b.of_type("idle_window")) == before
+    assert len(ws_w.of_type("idle_window")) == before
+
+
+@pytest.mark.parametrize("plies", [0, 1], ids=["ply_zero", "ply_one"])
+async def test_a_gift_during_an_abort_window_pushes_no_countdown(app, clock, plies):
+    """The abort windows are not capped by the clock -- they end before it can
+    flag -- so a gift to the side on the hook leaves the countdown alone."""
+    room, ws_w, ws_b = await _wired_room(app)
+    if plies:
+        await _move(app, room, ws_w, "white", "e2", "e4")
+    clock.advance(10)
+    room.backend.tick_clock()
+    on_hook = room.color_to_move()
+    giver = room.opp_color(on_hook)
+    giver_ws = ws_w if giver == "white" else ws_b
+    before = len(ws_b.of_type("idle_window"))
+
+    _, verdict = await dispatch(app, giver_ws, room, giver, _gift())
+
+    assert verdict == "granted"
+    assert room.idle_window().outcome == Reason.ABORTED
+    assert len(ws_b.of_type("idle_window")) == before
+    assert len(ws_w.of_type("idle_window")) == before
+
+
+async def test_a_capped_gift_pushes_no_countdown(app, clock):
+    """White moved instantly, so their clock is still full: the gift adds
+    nothing, the countdown cannot have changed, and nothing is pushed."""
+    room, ws_w, ws_b = await _room_at_ply_two(app)
+    before = len(ws_b.of_type("idle_window"))
+
+    _, verdict = await dispatch(app, ws_b, room, "black", _gift())
+
+    assert verdict == "capped"
+    assert ws_b.of_type("time_granted")[-1]["seconds_added"] == 0
+    assert len(ws_b.of_type("idle_window")) == before
+    assert len(ws_w.of_type("idle_window")) == before
+
+
+async def _accept_takeback(app, room, ws_w, ws_b):
+    asker = room.opp_color(room.color_to_move())
+    answerer = room.opp_color(asker)
+    by_color = {"white": ws_w, "black": ws_b}
+    await dispatch(app, by_color[asker], room, asker, _msg(type="takeback_request"))
+    _, outcome = await dispatch(app, by_color[answerer], room, answerer,
+                                _msg(type="takeback_response", accept=True))
+    assert outcome == "accepted"
+
+
+async def test_a_takeback_to_an_empty_board_charges_white_only_from_the_takeback(
+    app, clock,
+):
+    """REGRESSION: undo restored White's pre-move clock anchor, which on an
+    empty board is the PAIRING time. In 1+0, e4 at 5 s, a takeback at 55 s and
+    e4 again at 61 s charged White all 61 s and flagged them inside the move.
+    The accept branch re-anchors, so the replayed e4 costs only the 6 s since
+    the takeback."""
+    room, ws_w, ws_b = await _wired_room(app, time_minutes=1)
+    clock.advance(5)
+    await _move(app, room, ws_w, "white", "e2", "e4")
+    clock.advance(50)
+    await _accept_takeback(app, room, ws_w, ws_b)
+    assert not room.backend.move_history
+    restored = room.backend.clock.white_remaining
+    clock.advance(6)
+
+    _, outcome = await _move(app, room, ws_w, "white", "e2", "e4")
+
+    assert outcome == "applied"
+    assert room.result is None
+    assert not ws_w.of_type("result")
+    assert room.backend.clock.white_remaining == pytest.approx(restored - 6.0)
+
+
+async def test_a_mid_game_takeback_charges_the_restored_side_only_one_tick(app, clock):
+    """REGRESSION: after a mid-game takeback the restored side's clock kept the
+    anchor from before the undone ply, so the next sweep tick charged it for
+    the opponent's whole think -- while the client re-anchored to now and
+    showed a clock half a minute fuller than the server's. One sweep tick after
+    the takeback now charges exactly that tick, and nobody else."""
+    room, ws_w, ws_b = await _wired_room(app, time_minutes=3)
+    await _move(app, room, ws_w, "white", "e2", "e4")
+    clock.advance(20)
+    await _move(app, room, ws_b, "black", "e7", "e5")
+    clock.advance(30)
+    await _accept_takeback(app, room, ws_w, ws_b)
+    assert room.color_to_move() == "black"
+    clk = room.backend.clock
+    black_restored, white_restored = clk.black_remaining, clk.white_remaining
+    wire = ws_b.of_type("takeback_applied")[-1]["clock"]
+    clock.advance(1)
+
+    await app.state.sweep.step_clock_and_idle_windows()
+
+    assert clk.black_remaining == pytest.approx(black_restored - 1.0)
+    assert clk.white_remaining == white_restored
+    assert wire["black_remaining"] == black_restored, \
+        "the boards were shown the restored time the server now charges from"
+
+
+async def test_a_takeback_on_an_untimed_board_still_lands(app, clock):
+    """The re-anchor only applies when there is a clock to move; a board
+    without one takes the same accept path and simply rewinds."""
+    room, ws_w, ws_b = await _wired_room(app)
+    await _move(app, room, ws_w, "white", "e2", "e4")
+    room.backend.clock = None
+
+    await _accept_takeback(app, room, ws_w, ws_b)
+
+    assert not room.backend.move_history
+    assert ws_b.of_type("takeback_applied")
+
+
+@pytest.mark.parametrize("plies", [0, 1], ids=["ply_zero", "ply_one"])
+async def test_a_resignation_before_both_sides_moved_is_an_abort(app, clock, plies):
+    """The pregame rule through the real handler path: a resignation before
+    both sides have moved calls the game off -- both boards are told aborted
+    with no winner, and the series is left untouched."""
+    room, ws_w, ws_b = await _wired_room(app)
+    if plies:
+        await _move(app, room, ws_w, "white", "e2", "e4")
+    assert room.plies_ever == plies
+
+    _, outcome = await dispatch(app, ws_w, room, "white", _msg(type="resign"))
+
+    assert outcome == "resigned"
+    assert room.result == (Reason.ABORTED, None)
+    assert room.series_scores == {}
+    for ws in (ws_w, ws_b):
+        results = ws.of_type("result")
+        assert [(m["reason"], m["winner_color"]) for m in results] == [
+            (Reason.ABORTED, None)]
+
+
+@pytest.mark.parametrize("plies", [0, 1], ids=["ply_zero", "ply_one"])
+async def test_crossed_draw_offers_before_both_sides_moved_are_an_abort(
+    app, clock, plies,
+):
+    """The other door to an agreed draw: a second offer meeting a standing one
+    agrees it inside handle_draw_offer. Before both sides have moved that is an
+    abort too, with no point split."""
+    room, ws_w, ws_b = await _wired_room(app)
+    if plies:
+        await _move(app, room, ws_w, "white", "e2", "e4")
+    await dispatch(app, ws_w, room, "white", _msg(type="draw_offer"))
+
+    _, outcome = await dispatch(app, ws_b, room, "black", _msg(type="draw_offer"))
+
+    assert outcome == "agreed"
+    assert room.result == (Reason.ABORTED, None)
+    assert room.series_scores == {}
+    for ws in (ws_w, ws_b):
+        assert [(m["reason"], m["winner_color"]) for m in ws.of_type("result")] == [
+            (Reason.ABORTED, None)]
+
+
+async def test_a_resignation_once_both_sides_moved_still_scores(app, clock):
+    """The other side of the pregame line: from ply 2 on a resignation is a
+    real result -- the opponent wins and takes the series point."""
+    room, ws_w, ws_b = await _room_at_ply_two(app)
+
+    _, outcome = await dispatch(app, ws_w, room, "white", _msg(type="resign"))
+
+    assert outcome == "resigned"
+    assert room.result == (Reason.RESIGNATION, "black")
+    assert room.series_scores == {BOB: 1.0}
+    for ws in (ws_w, ws_b):
+        assert [(m["reason"], m["winner_color"]) for m in ws.of_type("result")] == [
+            (Reason.RESIGNATION, "black")]
