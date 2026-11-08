@@ -33,7 +33,7 @@ so unlike the other levels it structurally cannot fire every steady-state
 frame — a per-frame function is allowed a guarded error-path log.exception."""
 
 FRAME_FUNCTIONS = {
-    "chessshootout/frontend/frontend.py": ["draw_frame"],
+    "chessshootout/frontend/frontend.py": ["draw_frame", "_run_frame"],
     "chessshootout/frontend/board/board.py": ["draw_board", "update_drag_physics"],
     "chessshootout/frontend/game/result_flow.py": ["update_result_pending"],
     "chessshootout/frontend/game/give_time.py": ["update_give_time_hold"],

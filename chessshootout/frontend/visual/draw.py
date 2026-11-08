@@ -111,7 +111,9 @@ def supersample(size: int | tuple[int, int], render: Callable[[pg.Surface, int],
     hand-drawn shape in the game -- icons, panels, dials, markers -- is made
     this way and then cached, since the oversized draw is the expensive part
 
-    :param size: finished size in pixels, one number for a square
+    :param size: finished size in pixels, one number for a square; a negative
+        side is taken as zero, so a degenerate rect yields an empty shape
+        rather than an error
     :param render: draws the shape, given the oversized canvas and the factor
         it was enlarged by, so it can scale its own coordinates and widths
     :param scale: how many times oversized to draw; higher is smoother
@@ -119,6 +121,7 @@ def supersample(size: int | tuple[int, int], render: Callable[[pg.Surface, int],
     """
     if isinstance(size, int):
         size = (size, size)
+    size = (max(size[0], 0), max(size[1], 0))
     big = pg.Surface((size[0] * scale, size[1] * scale), pg.SRCALPHA)
     render(big, scale)
     return pg.transform.smoothscale(big, size)
