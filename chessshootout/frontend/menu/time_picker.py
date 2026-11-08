@@ -16,6 +16,7 @@ from chessshootout.frontend.visual.tween import Tween
 
 CHAMBERS = ((1, "1"), (3, "3"), (5, "5"), (10, "10"), (15, "15"), (30, "30"), (None, "∞"))
 TIMED_MINUTES = tuple(minutes for minutes, _ in CHAMBERS if minutes is not None)
+ONLINE_DEFAULT_TIME_MINUTES = 5
 INCREMENTS = (0, 2, 5, 10, 15)
 CHAMBER_COUNT = len(CHAMBERS)
 CHAMBER_STEP_DEG = 360.0 / CHAMBER_COUNT
@@ -468,16 +469,19 @@ class TimePicker:
 
         :returns: index of the nearest chamber that may be seated
         """
-        def turn_away(i: int) -> float:
-            """
-            How far the drum would still have to turn to seat a chamber, the
-            short way round
+        return min((i for i in range(CHAMBER_COUNT) if self._chamber_allowed(i)),
+                   key=lambda i: abs(self._seat_delta(i)))
 
-            :param i: chamber index to measure
-            :returns: degrees of turn, always non-negative
-            """
-            return abs(((-i * CHAMBER_STEP_DEG - self._rotation + 180.0) % 360.0) - 180.0)
-        return min((i for i in range(CHAMBER_COUNT) if self._chamber_allowed(i)), key=turn_away)
+    def _seat_delta(self, index: int) -> float:
+        """
+        How far the drum still has to turn to bring one chamber under the
+        hammer, the short way round: the single angle rule that seating by
+        click, settling a spin and picking the nearest chamber all share
+
+        :param index: chamber index to measure
+        :returns: signed degrees of turn, within half a turn either way
+        """
+        return ((-index * CHAMBER_STEP_DEG - self._rotation + 180.0) % 360.0) - 180.0
 
     def _turret_label_rect(self, i: int) -> pg.Rect:
         """
@@ -728,8 +732,7 @@ class TimePicker:
         if index == self._min_index or not self._chamber_allowed(index):
             return
         self._min_index = index
-        base_target = -index * CHAMBER_STEP_DEG
-        delta = ((base_target - self._rotation + 180.0) % 360.0) - 180.0
+        delta = self._seat_delta(index)
         self._rot_start = self._rotation
         self._rot_target = self._rotation + delta
         self._rot_steps = int(round(abs(delta) / CHAMBER_STEP_DEG))
@@ -876,8 +879,7 @@ class TimePicker:
         increment as a click would
         """
         index = self._nearest_allowed_to_rotation()
-        base_target = -index * CHAMBER_STEP_DEG
-        delta = ((base_target - self._rotation + 180.0) % 360.0) - 180.0
+        delta = self._seat_delta(index)
         self._rot_start = self._rotation
         self._rot_target = self._rotation + delta
         self._rot_steps = int(round(abs(delta) / CHAMBER_STEP_DEG))

@@ -54,12 +54,11 @@ Tests mirror the source layout, five dirs under `tests/`:
   split out of `app.py` (`limits.py`, `routes_http.py`, `ws_session.py`) kept
   their coverage where it already was — `test_server_app.py`,
   `test_server_validation.py`, `test_rate_limit_client_ip.py` — with the imports
-  and monkeypatch targets moved to the new homes.
+  and monkeypatch targets moved to the new homes. `test_matchmake_leave.py`
+  drives a new search or a cancel racing a pairing over `TestClient` websockets.
 - `tests/online/` — client-side online multiplayer: the top-level
   `chessshootout/online/` package (`OnlineClient`, `ServerTransport`) plus
-  `chessshootout/frontend/online_coordinator.py` and the offer banners. 
-  `test_online_matchmake_abort.py` drives a new search or a cancel racing a
-  pairing over `TestClient` websockets;
+  `chessshootout/frontend/online_coordinator.py` and the offer banners.
   `test_online_rematch_decline_integration.py` runs two whole `Frontend`s in one
   process against a real server, seat-switched per frame, through a declined
   rematch and back into a fresh search.

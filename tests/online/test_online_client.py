@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from chessshootout.online.client import (
-    OnlineClient, PING_SAMPLE_WINDOW, RECONNECT_BACKOFF_MAX_SECONDS,
+    ClientReason, OnlineClient, PING_SAMPLE_WINDOW, RECONNECT_BACKOFF_MAX_SECONDS,
     SERVER_FULL_RETRIES)
 from chessshootout.online.transport import (
     ClientOutdated, SchemaVersionMismatch,
@@ -217,6 +217,57 @@ def test_ws_session_refreshes_liveness_and_opp_state_on_connect():
 
 async def _closed_ws_coro():
     return _ClosedWs()
+
+
+def _queued_client():
+    client = OnlineClient()
+    client._room_id, client._session_token = "r", "t"
+    client._outbound = asyncio.Queue()
+    client._in_queue = True
+    client._transport = SimpleNamespace(
+        ws_connect=lambda room, token: _closed_ws_coro())
+    return client
+
+
+def test_a_socket_closed_before_the_game_starts_reports_a_lost_search():
+    """REGRESSION: a cancel racing the pairing let the server drop the room
+    before the opponent's socket authenticated, so that socket was closed
+    unanswered and the session ended without a word -- the wait card counted
+    forever. Closing while still queued is now reported, once, as a lost
+    search, and nothing tries to resume a game that never started."""
+    client = _queued_client()
+
+    asyncio.run(client._run_session_with_reconnects())
+
+    events = client.drain_inbound()
+    assert [(ev.type, ev.payload) for ev in events] == [
+        ("error", {"reason": ClientReason.SEARCH_LOST})]
+    assert client.state == "disconnected"
+
+
+def test_a_player_cancelling_the_search_is_not_told_the_search_was_lost():
+    client = _queued_client()
+    client._stop.set()
+
+    asyncio.run(client._run_session_with_reconnects())
+
+    assert client.drain_inbound() == []
+
+
+def test_a_socket_closed_after_the_game_started_never_reports_a_lost_search(monkeypatch):
+    client = _queued_client()
+    client._in_queue = False
+    client._game_active = True
+
+    async def no_resume():
+        return None
+
+    monkeypatch.setattr(client, "_resume_with_retries", no_resume)
+    asyncio.run(client._run_session_with_reconnects())
+
+    reasons = [ev.payload.get("reason") for ev in client.drain_inbound()]
+    assert ClientReason.SEARCH_LOST not in reasons
+    assert reasons == [ClientReason.RECONNECT_FAILED]
 
 
 def test_resume_backoff_grows_and_is_bounded(monkeypatch):

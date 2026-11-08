@@ -18,10 +18,9 @@ import pygame as pg
 import pytest
 
 from tests.conftest import pygame_display
-from chessshootout.domain.match import ONLINE, SINGLE_SCREEN
+from chessshootout.domain.match import BOT, ONLINE, SINGLE_SCREEN
 from chessshootout.frontend.menu import play_view as play_view_mod
-from chessshootout.frontend.menu.time_picker import CHAMBERS
-from chessshootout.frontend.online_coordinator import ONLINE_DEFAULT_TIME_MINUTES
+from chessshootout.frontend.menu.time_picker import CHAMBERS, ONLINE_DEFAULT_TIME_MINUTES
 from chessshootout.frontend.menu.play_view import (
     COMING_SOON, CTA_BOTTOM, POPOVER_CLOSE_MS, POPOVER_OPEN_MS, RECON_GAP, SIDE_OPTIONS,
     SUMMARY_CHIP_ICON, PlayView)
@@ -719,8 +718,13 @@ def test_apply_resume_config_onto_an_untimed_panel_lands_on_a_timed_chamber(hero
     assert hero.selected_time_minutes == ONLINE_DEFAULT_TIME_MINUTES
 
 
-def test_online_search_config_forces_online_mode(app, hero):
-    hero.selected_mode = SINGLE_SCREEN
+@pytest.mark.parametrize("mode", [SINGLE_SCREEN, BOT, ONLINE])
+def test_online_search_config_forces_online_mode(app, hero, mode):
+    """The live read New Search starts from always asks for an online game and
+    otherwise carries the panel's choice; the minutes are always a timed
+    chamber (an untimed drum is replaced by the online default, pinned in the
+    next test), so a timed panel is compared key for key."""
+    hero.selected_mode = mode
     hero.selected_side = "black"
     hero.selected_time_minutes, hero.selected_increment_seconds = 3, 2
 
@@ -728,8 +732,29 @@ def test_online_search_config_forces_online_mode(app, hero):
 
     assert config["mode"] == ONLINE
     expected = dict(hero.build_config())
+    assert expected["mode"] == mode, "the panel itself is left on its own mode"
     expected["mode"] = ONLINE
     assert config == expected
+
+
+def test_online_search_config_reads_the_panel_live(app, hero):
+    """No snapshot: a side or time control changed after an earlier read shows
+    up in the next one."""
+    first = app.menu.online_search_config()
+    hero.selected_side = "black"
+    hero.selected_time_minutes = 3
+    hero.selected_increment_seconds = 2
+    second = app.menu.online_search_config()
+    assert second["side"] == "black"
+    assert second["time_minutes"] == 3
+    assert second["increment_seconds"] == 2
+    assert first is not second
+
+
+def test_online_search_config_returns_a_fresh_dict_each_time(app):
+    config = app.menu.online_search_config()
+    config["side"] = "tampered"
+    assert app.menu.online_search_config()["side"] != "tampered"
 
 
 def test_online_search_config_never_asks_for_an_untimed_game(app, hero):

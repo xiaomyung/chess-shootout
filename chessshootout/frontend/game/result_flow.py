@@ -97,10 +97,10 @@ class ResultFlow:
 
     def reset_series(self) -> None:
         """
-        Forget the running online series, so the next game counts from zero.
-        This is called when a game starts that is not part of the online series,
-        or when the screen is cut loose from its online session, so an old score
-        never reaches a later round label
+        Forget the running online series. The game screen calls this at every
+        game start, before an online start re-seeds it from the server, and
+        the coordinator calls it when the board is cut loose from its session,
+        so an old score never reaches a later round label
         """
         self.series_scores = {}
 

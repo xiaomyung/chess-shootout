@@ -43,8 +43,6 @@ TOAST_REASON_MAX_CHARS = 80
 APPLY_FAILED_LABEL = "Couldn't apply the server update"
 APPLY_FAILED_TOAST_KEY = "online_apply_failed"
 
-ONLINE_DEFAULT_TIME_MINUTES = 5
-
 RECONNECT_PROBE_INTERVAL_MS = 5000
 RECONNECT_PROBE_MAX_ATTEMPTS = 3
 
@@ -61,6 +59,7 @@ MOVE_INVALIDATED_OFFER_KEYS = ("draw_offered", "takeback_offered")
 ONLINE_HARD_FAILURE_LABELS = {
     ClientReason.SERVER_UNREACHABLE: "Server unreachable",
     ClientReason.RECONNECT_FAILED: "Could not reconnect",
+    ClientReason.SEARCH_LOST: "Search interrupted",
     Reason.ROOM_FULL: "Server is full",
     Reason.INVALID_FIELD: "Request rejected by server",
 }
@@ -183,6 +182,7 @@ class OnlineCoordinator:
         self._match_found_at_ms: int | None = None
         self._match_found_started_seconds_ago = 0.0
         self._pending_game_start_payload: dict[str, Any] | None = None
+        self._pending_result: dict[str, Any] | None = None
         self._rematch_offered = False
         self._prev_online_state: str | None = None
 
@@ -788,7 +788,9 @@ class OnlineCoordinator:
         """
         Narrate what is happening to a pending rematch -- the opponent dropped,
         came back, withdrew, declined or left -- through one toast that keeps
-        replacing itself. Anything final also closes the rematch window
+        replacing itself. Anything final also closes the rematch window. A
+        withdrawn offer leaves the window open, so the player's own Rematch
+        button comes back even if they had just declined that offer
 
         :param payload: rematch update message, keyed by event
         """
@@ -803,6 +805,7 @@ class OnlineCoordinator:
             return
         if event == "cancelled":
             self._clear_rematch_offer()
+            self.app.game.result_menu.set_rematch_withheld(False)
             self.app.toast.show(f"{opp} withdrew the rematch", key=REMATCH_STATE_TOAST_KEY)
             return
         labels = {
@@ -1173,15 +1176,19 @@ class OnlineCoordinator:
         Deliver the server's final word on the game, the only place an online
         result ever comes from. It reaches the game screen even with nothing
         subscribed, so a game that ended after the player left is still saved.
-        A result for a game that has not reached the board yet -- still
-        queued, or still behind the match-found card -- has no board to land
-        on: forwarding it would settle and re-save whatever the game screen
-        last showed, so it is dropped, and the opponent-left notice that
-        follows it is what takes the pairing down
+        A result for a game that has not reached the board yet has no board to
+        land on, since forwarding it would settle and re-save whatever the
+        game screen last showed. Behind the match-found card it belongs to the
+        game the card is about to start, so it is kept and handed to that
+        board as soon as the card finishes; while still queued it is dropped
 
         :param payload: result message: reason and the winning colour
         """
-        if self._pending_game_start_payload is not None or self.wait_modal.is_visible():
+        if self._pending_game_start_payload is not None:
+            log.debug("online result parked pregame reason=%s", payload.get("reason"))
+            self._pending_result = payload
+            return
+        if self.wait_modal.is_visible():
             log.debug("online result dropped pregame reason=%s", payload.get("reason"))
             return
         self._forward_screen_event("on_result", payload)
@@ -1250,10 +1257,15 @@ class OnlineCoordinator:
         arm the first-move abort countdown with the time the card itself spent
         already taken off it. The window is the same length the server sweep
         uses for this time control, and White's clock is backdated by that
-        same time, so what the board shows is what the server will charge
+        same time, so what the board shows is what the server will charge. A
+        result that arrived while the card was up is handed to the new board
+        last, so a game the server already ended settles to its real outcome
+        instead of sitting live under a countdown
         """
         payload = self._pending_game_start_payload
         self._pending_game_start_payload = None
+        parked_result = self._pending_result
+        self._pending_result = None
         matched_at_ms = self._match_found_at_ms
         self._match_found_at_ms = None
         elapsed = self._match_found_started_seconds_ago
@@ -1272,6 +1284,8 @@ class OnlineCoordinator:
             "outcome": Reason.ABORTED, "color": "white",
             "seconds_remaining": max(window - elapsed, 0.0),
         })
+        if parked_result is not None:
+            self._forward_screen_event("on_result", parked_result)
 
     def _session_id_for_online(self) -> str:
         """
@@ -1370,7 +1384,7 @@ class OnlineCoordinator:
             "nickname": (config.get("nickname") or "").strip() or "Player",
             "client_uuid": env.get_or_create_client_uuid(),
             "client_version": paths.get_app_version(),
-            "time_minutes": config["time_minutes"] or ONLINE_DEFAULT_TIME_MINUTES,
+            "time_minutes": config["time_minutes"],
             "increment_seconds": config["increment_seconds"],
             "side_preference": config["side"],
             "country": env.get_country() or None,
@@ -1382,6 +1396,7 @@ class OnlineCoordinator:
         self._wait_started_at_ms = pg.time.get_ticks()
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
+        self._pending_result = None
 
     def _search_labels(self) -> tuple[str, str]:
         """
@@ -1392,7 +1407,7 @@ class OnlineCoordinator:
             increment as text
         """
         config = cast("dict[str, Any]", self._online_config)
-        minutes = config.get("time_minutes") or ONLINE_DEFAULT_TIME_MINUTES
+        minutes = config["time_minutes"]
         incr = config.get("increment_seconds", 0) or 0
         return time_category_for_minutes(minutes), f"{minutes} + {incr}"
 
@@ -1401,14 +1416,15 @@ class OnlineCoordinator:
         Let go of the server session, either by leaving the matchmaking queue
         or by closing the socket outright. A resync in flight is abandoned with
         it, since there would be nothing left to apply the answer to, and the
-        remembered connection state goes too, so the next session is watched
-        from scratch
+        remembered connection state and any result kept back for a pairing go
+        too, so the next session is watched from scratch
 
         :param cancel_queue: True while still queued, so the server drops the
             entry instead of leaving it to time out
         """
         self._end_resync(replay=False)
         self._prev_online_state = None
+        self._pending_result = None
         if self.client is None:
             return
         if cancel_queue:
@@ -1420,14 +1436,15 @@ class OnlineCoordinator:
     def _clear_search_state(self) -> None:
         """
         Wipe everything the search put on screen -- the waiting card, the
-        match-found card and the pairing it was holding -- so the next search
-        starts from nothing
+        match-found card and the pairing it was holding, with any result kept
+        back for it -- so the next search starts from nothing
         """
         self.wait_modal.hide()
         self.match_found_modal.hide()
         self._wait_started_at_ms = None
         self._match_found_at_ms = None
         self._pending_game_start_payload = None
+        self._pending_result = None
 
     def unbind_game_from_online(self) -> None:
         """

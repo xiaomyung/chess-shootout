@@ -380,6 +380,111 @@ def test_latched_minimized_flag_still_presents_after_a_wake_event(
     assert waits["idle"] == 2
 
 
+@pytest.mark.parametrize("wake_type", [
+    pg.WINDOWEXPOSED, pg.WINDOWRESTORED, pg.WINDOWSHOWN, pg.WINDOWFOCUSGAINED,
+], ids=["exposed", "restored", "shown", "focus_gained"])
+def test_a_wake_from_an_iconic_surface_rebuilds_surface_and_layout(
+        monkeypatch, window, presents, wake_type):
+    """REGRESSION: the wake fail-safe only switched presenting back on, so a
+    window whose flag stayed latched kept the iconic surface and the
+    minimum-size layout for the rest of the session. A wake now reconciles
+    exactly like a real restore edge."""
+    app, _ = _booted(monkeypatch)
+    _minimize(app, window)
+    app._run_frame()
+    assert app.window.get_size() == ICONIC_SIZE
+    presents.take()
+
+    window.size = (1100, 850)
+    pg.event.post(pg.event.Event(wake_type, {}))
+    app._run_frame()
+
+    assert window.active is False, "the system flag is still latched"
+    assert app.window.get_size() == (1100, 850)
+    assert (app.window_width, app.window_height) == (1100, 850)
+    assert app._last_layout_size == (1100, 850)
+    assert app._minimized is False
+    assert presents.take() == ["flip"]
+
+
+def test_a_woken_window_keeps_following_resizes_on_windows(monkeypatch, window, presents):
+    """After a wake the stuck flag no longer gates the surface: on Windows a
+    resize event remakes it and the per-frame edge-drag sync follows the real
+    window again, while the flag still reads minimized."""
+    from types import SimpleNamespace
+
+    from chessshootout.frontend import frontend as frontend_module
+
+    app, _ = _booted(monkeypatch)
+    _minimize(app, window)
+    window.size = (1100, 850)
+    pg.event.post(pg.event.Event(pg.WINDOWRESTORED, {}))
+    app._run_frame()
+    assert app.window.get_size() == (1100, 850)
+
+    recreated = []
+    monkeypatch.setattr(app, "_recreate_window_surface",
+                        lambda w, h: recreated.append((w, h)))
+    real_os = frontend_module.os
+    monkeypatch.setattr(frontend_module, "os", SimpleNamespace(name="nt", environ={}))
+    app._on_videoresize(1200, 900)
+    window.size = (1300, 950)
+    app._sync_window_surface()
+    monkeypatch.setattr(frontend_module, "os", real_os)
+
+    assert window.active is False
+    assert recreated == [(1200, 900), (1300, 950)]
+    assert (app.window_width, app.window_height) == (1300, 950)
+
+
+def test_a_new_minimize_after_a_wake_stops_the_surface_following_again(
+        monkeypatch, window, presents):
+    """The wake only lasts until the next real minimize edge: from then on a
+    resize is a minimized one again and never remakes the surface."""
+    app, _ = _booted(monkeypatch)
+    window.active = False
+    app._run_frame()
+    pg.event.post(pg.event.Event(pg.WINDOWEXPOSED, {}))
+    app._run_frame()
+    assert app._effectively_minimized() is False
+    window.active = True
+    app._run_frame()
+    window.active = False
+    app._run_frame()
+    assert app._effectively_minimized() is True
+    recreated = []
+    monkeypatch.setattr(app, "_recreate_window_surface",
+                        lambda w, h: recreated.append((w, h)))
+    app._on_videoresize(*ICONIC_SIZE)
+    assert recreated == []
+
+
+def test_a_restore_whose_wake_event_lands_in_the_same_frame_reconciles_once(
+        monkeypatch, window, presents):
+    """A real restore delivers WINDOWRESTORED in the very frame get_active()
+    flips back. The wake path defers to the per-frame edge check when the flag
+    has already cleared, so the window is laid out once, not twice."""
+    app, _ = _booted(monkeypatch)
+    _minimize(app, window)
+    app._run_frame()
+    finishes = []
+    real_finish = app._finish_resize
+    monkeypatch.setattr(app, "_finish_resize",
+                        lambda w, h: finishes.append((w, h)) or real_finish(w, h))
+    presents.take()
+
+    window.active = True
+    window.size = (1100, 850)
+    pg.event.post(pg.event.Event(pg.WINDOWRESTORED, {}))
+    app._run_frame()
+
+    assert finishes == [(1100, 850)]
+    assert app.window.get_size() == (1100, 850)
+    assert app._minimized is False
+    assert app._woke is False
+    assert presents.take() == ["flip"]
+
+
 def test_a_wake_event_on_a_visible_window_changes_nothing(monkeypatch, window, presents):
     app, _ = _booted(monkeypatch)
     pg.event.post(pg.event.Event(pg.WINDOWFOCUSGAINED, {}))

@@ -7,9 +7,8 @@ from chessshootout.domain.match import SINGLE_SCREEN, BOT, ONLINE
 from chessshootout.infra import env
 from chessshootout.frontend.menu.layout import MenuLayout
 from chessshootout.frontend.menu.time_picker import (
-    CHAMBERS, INCREMENTS, TIMED_MINUTES, TimePicker)
+    CHAMBERS, INCREMENTS, ONLINE_DEFAULT_TIME_MINUTES, TIMED_MINUTES, TimePicker)
 from chessshootout.frontend.menu.view import MenuView, scale_floor
-from chessshootout.frontend.online_coordinator import ONLINE_DEFAULT_TIME_MINUTES
 from chessshootout.frontend.visual.cache import (
     memoized_surface, new_cache, new_size_cache, render_text)
 from chessshootout.frontend.visual.colors import Colors
@@ -443,7 +442,7 @@ class PlayView(MenuView):
             return
         self._applied_defaults = stored
         minutes, seconds = stored
-        if minutes in [value for value, _ in CHAMBERS]:
+        if minutes is None or minutes in TIMED_MINUTES:
             self.selected_time_minutes = minutes
         if seconds in INCREMENTS:
             self.selected_increment_seconds = seconds

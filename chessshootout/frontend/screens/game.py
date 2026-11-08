@@ -562,7 +562,9 @@ class GameScreen(Screen):
         Adopt the idle countdown the server pushes when the side to move has
         gone quiet, and show it as an auto-end badge on that player's strip.
         The server owns the decision -- this only mirrors it -- and a resign
-        window that is nearly up on the opponent also raises a toast
+        window that is nearly up on the opponent also raises a toast. The
+        badge's full length is the window fitted to this game's time control,
+        by the same rule the server uses
 
         :param payload: idle-window payload -- outcome, the colour being timed
             and how many seconds are left
@@ -573,10 +575,8 @@ class GameScreen(Screen):
         raw_color = payload.get("color")
         if outcome not in IDLE_SECONDS_BY_OUTCOME or raw_color not in ("white", "black"):
             return
-        if self._time_control is not None:
-            total = idle_window_seconds(outcome, float(self._time_control[0]))
-        else:
-            total = float(IDLE_SECONDS_BY_OUTCOME[outcome])
+        initial = float(self._time_control[0]) if self._time_control is not None else 0.0
+        total = idle_window_seconds(outcome, initial)
         seconds = min(
             max(cast(float, _finite_float(payload.get("seconds_remaining"), 0.0)), 0.0), total)
         color = PieceColor.WHITE if raw_color == "white" else PieceColor.BLACK

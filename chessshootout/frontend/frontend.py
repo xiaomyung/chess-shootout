@@ -54,8 +54,9 @@ KEY_REPEAT_INTERVAL_MS = 35
 MINIMIZED_TARGET_FPS = 20
 
 FORFEIT_SEARCH_TITLE = "Abandon your duel?"
-FORFEIT_SEARCH_SUB = ("Your unfinished game is still out there. A new search forfeits it, "
-                      "and your opponent walks off with the win.")
+FORFEIT_SEARCH_SUB = ("Your unfinished game is still out there. A new search ends it: "
+                      "called off if you both had not moved yet, otherwise your opponent "
+                      "takes the win.")
 FORFEIT_SEARCH_YES = "Search anyway"
 FORFEIT_SEARCH_NO = "Cancel"
 FORFEIT_SEARCH_EMOJI = "⚔️"
@@ -150,6 +151,7 @@ class Frontend:
         self._idle_pacer = FramePacer(MINIMIZED_TARGET_FPS)
         self._reported_minimized = False
         self._minimized = False
+        self._woke = False
 
         self._needs_full_present = True
         self._last_layout_size: tuple[int, int] | None = None
@@ -466,6 +468,18 @@ class Frontend:
         """
         return not pg.display.get_active()
 
+    def _effectively_minimized(self) -> bool:
+        """
+        Decide whether the window should be treated as minimized when sizing
+        the drawing surface: the system says so and no window event has since
+        proved it visible. A woken window is sized like a visible one even
+        while a stuck system flag still reports it minimized, so its surface
+        keeps following the real window
+
+        :returns: True while the window is minimized and has not woken since
+        """
+        return self._window_minimized() and not self._woke
+
     def _track_minimized(self) -> None:
         """
         Compare the window's minimized state with last frame's reading and
@@ -485,6 +499,7 @@ class Frontend:
         follow are drawn but no longer presented
         """
         self._minimized = True
+        self._woke = False
         log.debug("window minimized")
 
     def _on_window_wake(self) -> None:
@@ -493,12 +508,17 @@ class Frontend:
         shown, exposed or focused -- as proof the window can be seen again,
         and go back to presenting even if the system still reports it
         minimized, so a state flag that never clears cannot freeze the screen
-        on its last frame. The router calls this for each such event
+        on its last frame. The window is put right exactly as on a real
+        restore, and from then on its surface keeps following the real window
+        size until the next minimize. A wake whose flag has already cleared is
+        left to the per-frame check, which reconciles that restore once in
+        this same frame. The router calls this for each such event
         """
-        if not self._minimized:
+        if not self._minimized or not self._window_minimized():
             return
-        self._minimized = False
         log.debug("window woke while still reported minimized")
+        self._reconcile_after_restore()
+        self._woke = True
 
     def _reconcile_after_restore(self) -> None:
         """
@@ -510,6 +530,7 @@ class Frontend:
         system gave it, because remaking it here would drop fullscreen
         """
         self._minimized = False
+        self._woke = False
         if self.chrome.is_fullscreen():
             target = _clamped_window_size(self.window.get_size())
         else:
@@ -656,15 +677,16 @@ class Frontend:
         Settle a resize the system announced. The size is raised to the
         interface's minimum, and the drawing surface is remade at that size
         on Windows, or whenever the floor changed it -- but never while the
-        window is minimized, since a minimized window cannot be grown and the
-        restore puts the surface right anyway. The screen hears about the
-        new surface before anything is measured against it
+        window is minimized and has not woken since, since a minimized window
+        cannot be grown and the restore puts the surface right anyway. The
+        screen hears about the new surface before anything is measured
+        against it
 
         :param w: window width in pixels the event reported
         :param h: window height in pixels the event reported
         """
         clamped = _clamped_window_size((w, h))
-        if not self._window_minimized() and (os.name == "nt" or clamped != (w, h)):
+        if not self._effectively_minimized() and (os.name == "nt" or clamped != (w, h)):
             self._recreate_window_surface(*clamped)
         self.screen.on_resize()
         self._finish_resize(*clamped)
@@ -702,11 +724,12 @@ class Frontend:
         Keep the drawing surface the same size as the borderless window while
         it is being dragged by an edge on Windows, where resize events do not
         arrive during the drag. Checked every frame, acted on only once the
-        two have actually drifted apart. A minimized window, or one reporting
-        no area at all, is left alone: its size means nothing, and remaking
-        the surface every frame against it would only fight the system
+        two have actually drifted apart. A minimized window that has not woken
+        since, or one reporting no area at all, is left alone: its size means
+        nothing, and remaking the surface every frame against it would only
+        fight the system
         """
-        if self._window_minimized():
+        if self._effectively_minimized():
             return
         size = self._os_window_size()
         if size[0] <= 0 or size[1] <= 0:

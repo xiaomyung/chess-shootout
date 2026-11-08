@@ -361,9 +361,9 @@ Layered recovery:
   client shows **"Server restarted — game ended"** with New Search / Cancel;
   New Search searches again with the Play panel's current choice.
 
-If a countdown ends with no reconnect, the game **aborts** (no winner) when a
-desync was left unresolved, or the waiting player **wins by abandonment** when
-the other side simply left. Starting a new search while still in a game ends
+If a countdown ends with no reconnect, the waiting player **wins by
+abandonment** (an **abort**, with no winner, if both players had not yet moved).
+Starting a new search while still in a game ends
 the old one at once: it aborts if both players had not yet moved, and is
 forfeited otherwise. If the start menu is offering **Reconnect**, FIND MATCH asks
 first (**Abandon your duel?**) before giving that game up. Reconnecting restores

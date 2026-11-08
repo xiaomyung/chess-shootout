@@ -30,7 +30,7 @@ from chessshootout.frontend.screens.game import (
 )
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.modals.reconnecting import ReconnectingModal
-from chessshootout.frontend.modals.result import ResultButtons
+from chessshootout.frontend.modals.result import NEW_SEARCH_LABEL, ResultButtons
 from chessshootout.frontend.online_coordinator import (
     MATCH_FOUND_SECONDS, NOT_YOUR_TURN_TOASTS, ONLINE_GAME_STATE_REASONS,
     ONLINE_HARD_FAILURE_LABELS, ONLINE_HARD_FAILURE_REASONS,
@@ -255,6 +255,9 @@ def test_match_found_transition_plays_online_game_start_sound(frontend):
         pytest.param(Reason.INVALID_FIELD,
                      ONLINE_HARD_FAILURE_LABELS[Reason.INVALID_FIELD],
                      id="invalid_field_friendly_label"),
+        pytest.param("search_lost",
+                     ONLINE_HARD_FAILURE_LABELS["search_lost"],
+                     id="search_lost_friendly_label"),
         pytest.param("http_503", "Server unreachable",
                      id="http_prefixed_falls_back_to_generic"),
     ],
@@ -461,6 +464,22 @@ def test_not_your_turn_with_known_msg_type_shows_toast(frontend, msg_type):
 def test_hard_failure_set_is_well_formed():
     assert "server_unreachable" in ONLINE_HARD_FAILURE_REASONS
     assert "reconnect_failed" in ONLINE_HARD_FAILURE_REASONS
+
+
+def test_a_lost_search_takes_the_wait_card_down_and_offers_a_new_search(frontend):
+    """The client reports a game socket that closed before the game started
+    (a cancel that raced the pairing, a server restart while queued) as a lost
+    search: the wait card goes instead of counting forever, and the confirm
+    offers New Search."""
+    frontend.coordinator.client = FakeOnlineClient()
+    frontend.coordinator.wait_modal.show("Blitz", "5 + 0", on_cancel=lambda: None)
+
+    frontend.coordinator._handle_online_error({"reason": "search_lost"})
+
+    assert not frontend.coordinator.wait_modal.is_visible()
+    assert frontend.confirm_modal.is_visible()
+    assert frontend.confirm_modal.title == "Search interrupted"
+    assert frontend.confirm_modal.yes_label == NEW_SEARCH_LABEL
 
 
 def test_a_refused_request_tears_the_search_down_instead_of_spinning(frontend):
@@ -947,6 +966,32 @@ def test_the_decliners_rematch_button_stays_hidden_until_the_window_expired_echo
     assert menu.button_state is ResultButtons.ONLINE_CLOSED
 
 
+def test_a_decline_answered_by_a_withdrawal_brings_the_rematch_button_back(
+        frontend, tmp_path, monkeypatch):
+    """REGRESSION: the offerer withdrew (left the result card) just as the
+    player hit Decline, so the server answered the decline with a noop and no
+    window_expired echo ever came. The withheld flag outlived the offer and
+    hid the player's own Rematch for the rest of the open window."""
+    _arm_post_game_on_card(frontend, tmp_path, monkeypatch)
+    client = FakeOnlineClient()
+    frontend.coordinator.client = client
+    frontend.coordinator._handle_rematch_request()
+    frontend.coordinator._decline_rematch()
+    menu = frontend.game.result_menu
+    assert menu.rematch_withheld is True
+
+    client.queue(Event("rematch_update", {"event": "cancelled"}))
+    frontend.coordinator.update(pg.time.get_ticks())
+
+    assert menu.rematch_withheld is False
+    assert menu.rematch_offered is False
+    assert menu.button_state is ResultButtons.ONLINE
+    assert frontend.coordinator.client is client, "the window is still open"
+    drawn = _drawn_buttons(frontend)
+    assert "rematch" in drawn
+    assert "new_search" not in drawn
+
+
 def test_events_behind_a_session_teardown_are_dropped(frontend, tmp_path, monkeypatch, caplog):
     """The server's ws_session finally can send the decliner an
     opponent_reconnecting notice for a room it already dropped, in the same
@@ -1012,11 +1057,12 @@ def _saved_games(tmp_path):
     return {path.name: path.read_bytes() for path in games_dir.glob("*.pgn")}
 
 
-def test_a_result_arriving_behind_the_match_found_card_never_reaches_the_board(
+def test_a_result_arriving_behind_the_match_found_card_never_reaches_the_old_board(
         frontend, tmp_path, monkeypatch, caplog):
     """The opponent started another search before the card finished, so the
-    server aborted the unstarted room. Forwarding that result would settle --
-    and re-save -- whatever the game screen last showed, so it is dropped."""
+    server aborted the unstarted room. Forwarding that result at once would
+    settle -- and re-save -- whatever the game screen last showed, so it is
+    parked for the board the card is about to start."""
     _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
     forwarded = []
     monkeypatch.setattr(frontend.game, "on_result", forwarded.append)
@@ -1026,11 +1072,47 @@ def test_a_result_arriving_behind_the_match_found_card_never_reaches_the_board(
         frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
 
     assert forwarded == []
+    assert frontend.coordinator._pending_result == {"reason": Reason.ABORTED}
     assert frontend.game.current_result() is None
     assert frontend.game.manual_result is None
     assert _saved_games(tmp_path) == before
-    assert any(r.getMessage().startswith("online result dropped pregame")
+    assert any(r.getMessage().startswith("online result parked pregame")
                for r in caplog.records)
+
+
+def test_a_result_parked_behind_the_card_settles_the_new_board_once_it_starts(
+        frontend, tmp_path, monkeypatch):
+    """REGRESSION: the result behind the match-found card is the new game's
+    own -- a ply-0 resign, or an abort window that ran out during a late
+    catch-up card. It used to be dropped, so the board started live on a room
+    the server had already finished, under an abort countdown nothing would
+    ever end. It now lands on that board as soon as the card is done, after
+    the abort countdown, so the countdown is cleared again."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    payload = {"reason": Reason.ABORTED, "winner_color": None}
+    frontend.coordinator._handle_online_result(payload)
+    assert frontend.game.current_result() is None
+
+    frontend.coordinator._finish_match_found()
+
+    assert frontend.screen is frontend.game
+    assert frontend.game.current_result() == "aborted"
+    assert frontend.game._idle_window is None
+    assert frontend.coordinator._pending_result is None
+
+
+def test_a_parked_result_never_outlives_the_pairing_it_was_kept_for(
+        frontend, tmp_path, monkeypatch):
+    """Clearing the search state (the opponent left, a new search, a resumed
+    game) throws a parked result away with the pairing, so it can never land
+    on a later board."""
+    _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
+    frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
+    frontend.coordinator._clear_search_state()
+    assert frontend.coordinator._pending_result is None
+    frontend.coordinator._pending_result = {"reason": Reason.ABORTED}
+    frontend.coordinator._drop_client()
+    assert frontend.coordinator._pending_result is None
 
 
 def test_a_result_arriving_while_still_queued_never_reaches_the_board(frontend, monkeypatch):
@@ -1046,9 +1128,10 @@ def test_a_result_arriving_while_still_queued_never_reaches_the_board(frontend, 
 
 def test_opponent_left_behind_the_match_found_card_tears_the_pairing_down(
         frontend, tmp_path, monkeypatch):
-    """After the dropped result, the opponent_left notice is what ends the
-    pairing: the card goes, the toast names the opponent from that pairing
-    (not the previous game's), and the player is back on the Play panel."""
+    """After the parked result, the opponent_left notice is what ends the
+    pairing: the card goes with the parked result, the toast names the
+    opponent from that pairing (not the previous game's), and the player is
+    back on the Play panel."""
     _pairing_behind_the_card(frontend, tmp_path, monkeypatch)
     frontend.coordinator._handle_online_result({"reason": Reason.ABORTED})
 
@@ -1058,6 +1141,7 @@ def test_opponent_left_behind_the_match_found_card_tears_the_pairing_down(
     assert "Newcomer left the game" in texts
     assert not any(text.startswith("Them ") for text in texts), "not the old game's opponent"
     assert frontend.coordinator._pending_game_start_payload is None
+    assert frontend.coordinator._pending_result is None
     assert not frontend.coordinator.match_found_modal.is_visible()
     assert frontend.coordinator.client is None
     assert frontend.screen is frontend.menu
