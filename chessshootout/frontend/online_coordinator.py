@@ -7,6 +7,7 @@ from typing import Any, NamedTuple, cast
 import pygame as pg
 
 from chessshootout import paths
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square, coord_from_square, square_from_coord
 from chessshootout.domain.pgn.load import time_category_for_minutes
 from chessshootout.frontend.modals.match_found import MatchFoundModal
@@ -23,8 +24,8 @@ from chessshootout.online.client import (
     probe_active_game,
 )
 from chessshootout.server.protocol import (
-    FIRST_MOVE_ABORT_SECONDS, GRACE_SECONDS, PROTOCOL_VERSION, Reason,
-    parse_client_version, version_text,
+    GRACE_SECONDS, PROTOCOL_VERSION, Reason, idle_window_seconds, parse_client_version,
+    version_text,
 )
 from chessshootout.skillcheck.wheel import SKILLCHECK_DEADLINE_MS
 
@@ -462,11 +463,21 @@ class OnlineCoordinator:
         """
         Take everything the network thread has queued since the last frame and
         apply it, one guarded call per event. It runs first in the coordinator's
-        frame, so the rest of the frame already sees the new state
+        frame, so the rest of the frame already sees the new state. A handler
+        that ends the session mid-batch -- a rematch window closing, say --
+        stops the drain there: whatever the dead session still had queued
+        belongs to it, not to the player, and is dropped with a note of how
+        many events went
         """
-        if self.client is None:
+        client = self.client
+        if client is None:
             return
-        for event in self.client.drain_inbound():
+        events = client.drain_inbound()
+        for index, event in enumerate(events):
+            if self.client is not client:
+                log.debug("online inbound dropped=%d after session change",
+                          len(events) - index)
+                break
             self._guarded_apply("event handler", lambda: self._handle_online_event(event))
 
     def _handle_online_event(self, event: Event) -> None:
@@ -669,11 +680,19 @@ class OnlineCoordinator:
 
     def _opp_name(self) -> str:
         """
-        Name the other player the way banners and toasts address them. It is
-        read off the game screen, so it follows whichever side this client got
+        Name the other player the way banners and toasts address them. While a
+        pairing is still behind the match-found card it is read off that
+        pairing, since the game screen still wears the previous game's names;
+        otherwise it is read off the game screen, so it follows whichever side
+        this client got
 
         :returns: the opponent's display nickname
         """
+        pending = self._pending_game_start_payload
+        if pending is not None:
+            opp = (pending["white_name"] if pending["your_color"] == "black"
+                   else pending["black_name"])
+            return env.clip_nickname(opp)
         game = self.app.game
         opp_color = "black" if game._chosen_side == "white" else "white"
         return cast(str, game._name_for_color(opp_color))
@@ -736,9 +755,13 @@ class OnlineCoordinator:
     def _decline_rematch(self) -> None:
         """
         Say no to the opponent's rematch from the banner and clear the offer
-        locally at once, without waiting for the server to confirm
+        locally at once, without waiting for the server to confirm. The result
+        card's own Rematch button stays off the row rather than coming back
+        for the round trip: the decision closes the window, and the server's
+        echo of it is what turns the card over to a new search
         """
         self._clear_rematch_offer()
+        self.app.game.result_menu.set_rematch_withheld(True)
         if self.client is not None:
             log.info("rematch response sent accepted=False")
             self.client.send_rematch_response(False)
@@ -1149,10 +1172,18 @@ class OnlineCoordinator:
         """
         Deliver the server's final word on the game, the only place an online
         result ever comes from. It reaches the game screen even with nothing
-        subscribed, so a game that ended after the player left is still saved
+        subscribed, so a game that ended after the player left is still saved.
+        A result for a game that has not reached the board yet -- still
+        queued, or still behind the match-found card -- has no board to land
+        on: forwarding it would settle and re-save whatever the game screen
+        last showed, so it is dropped, and the opponent-left notice that
+        follows it is what takes the pairing down
 
         :param payload: result message: reason and the winning colour
         """
+        if self._pending_game_start_payload is not None or self.wait_modal.is_visible():
+            log.debug("online result dropped pregame reason=%s", payload.get("reason"))
+            return
         self._forward_screen_event("on_result", payload)
 
     def _handle_connection_status(self, payload: dict[str, Any]) -> None:
@@ -1217,7 +1248,9 @@ class OnlineCoordinator:
         """
         Start the game once the match-found card has run its countdown, then
         arm the first-move abort countdown with the time the card itself spent
-        already taken off it
+        already taken off it. The window is the same length the server sweep
+        uses for this time control, and White's clock is backdated by that
+        same time, so what the board shows is what the server will charge
         """
         payload = self._pending_game_start_payload
         self._pending_game_start_payload = None
@@ -1231,9 +1264,13 @@ class OnlineCoordinator:
         self._start_online_game(payload)
         if matched_at_ms is not None:
             elapsed += (pg.time.get_ticks() - matched_at_ms) / 1000.0
+        clock = self.app.game.match.clock
+        if clock is not None and clock.running_for == PieceColor.WHITE:
+            clock.reanchor(clock.now_provider() - elapsed)
+        window = idle_window_seconds(Reason.ABORTED, float(payload["time_minutes"]) * 60.0)
         self._handle_idle_window({
             "outcome": Reason.ABORTED, "color": "white",
-            "seconds_remaining": max(FIRST_MOVE_ABORT_SECONDS - elapsed, 0.0),
+            "seconds_remaining": max(window - elapsed, 0.0),
         })
 
     def _session_id_for_online(self) -> str:
@@ -1283,8 +1320,9 @@ class OnlineCoordinator:
     def _begin_online_flow(self, config: dict[str, Any]) -> None:
         """
         Start looking for an opponent with the settings the player chose on the
-        menu. The settings are remembered, so a New Search after a failure can
-        repeat exactly the same request
+        menu. The settings are kept only for the search they start -- the
+        request itself and the waiting card's labels read them -- while a New
+        Search later reads the menu afresh
 
         :param config: play-view settings: nickname, time control and side
             preference
@@ -1301,15 +1339,22 @@ class OnlineCoordinator:
         Open a fresh connection to the chosen server and queue for a match,
         replacing whatever session was there before. Starting a search also
         retires any reconnect fetch still out on a worker thread, so its answer
-        cannot land on top of the session this one is about to open. An empty
-        address means there is nowhere to play, so the search is cancelled
-        instead
+        cannot land on top of the session this one is about to open, and
+        retires the Reconnect offer with it: the server forfeits a waiting
+        game the moment this player queues again, so the offer would point at
+        a room that no longer exists. An empty address means there is nowhere
+        to play, so the search is cancelled instead
 
         :param addr: server address to connect to, from the server picker
         """
         log.info("connect to %s", addr)
         with self._pending_reconnect_lock:
             self._reconnect_probe_gen += 1
+            dropped = self._pending_reconnect
+            self._pending_reconnect = None
+        self.app.menu.set_reconnect_available(False)
+        if dropped is not None:
+            log.info("reclaim dropped: search started")
         if not addr:
             self._on_online_cancel()
             return
@@ -1387,8 +1432,9 @@ class OnlineCoordinator:
     def unbind_game_from_online(self) -> None:
         """
         Turn the game screen back into a plain local board: no side ownership,
-        no move forwarding, no online result menu and none of the disconnect or
-        idle countdowns. Runs whenever an online session ends, for any reason
+        no move forwarding, no online result menu, no running series and none
+        of the disconnect or idle countdowns. Runs whenever an online session
+        ends, for any reason, so nothing of it can reach the next game
         """
         game = self.app.game
         game.variant = Variant.LOCAL
@@ -1396,6 +1442,7 @@ class OnlineCoordinator:
         game.match.on_local_move_applied = None
         game.right_menu.set_game_info(None)
         game.result_menu.set_buttons(ResultButtons.LOCAL)
+        game.result_flow.reset_series()
         self._clear_online_countdowns()
 
     def _clear_online_countdowns(self) -> None:
@@ -1510,15 +1557,17 @@ class OnlineCoordinator:
 
     def restart_search(self) -> None:
         """
-        Start a brand new search with the settings from the last one, the New
-        Search answer to a hard failure. With no remembered settings there is
-        nothing to repeat, so the player just goes back to the menu
+        Start a brand new search for whatever the menu's Play panel shows right
+        now, the New Search answer on a closed result card and in the hard
+        failure dialogs. The panel is read before the old session is torn down,
+        so the search always has a request to make -- a session rebuilt by
+        Reconnect, which never searched, included -- and the side and time
+        control are the player's current choices, not the ones a past search
+        or the resumed room happened to have
         """
+        config = self.app.menu.online_search_config()
         self._tear_down_online_session("restart_search")
-        if self._online_config is not None:
-            self._begin_online_flow(self._online_config)
-        else:
-            self._return_to_menu_card()
+        self._begin_online_flow(config)
 
     def retain_for_rematch(self, keep_online: bool) -> None:
         """

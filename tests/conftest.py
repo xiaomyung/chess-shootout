@@ -151,6 +151,23 @@ def _isolate_hide_opp_marks() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_nickname_and_last_mode() -> Iterator[None]:
+    """
+    env.set_nickname and env.set_last_mode write os.environ directly (not via
+    monkeypatch), so a test that starts a game or adopts a resume would leak the
+    nickname and the last mode into later tests in the same worker. Pop both
+    before and after every test to keep the default (unset)
+
+    :returns: control to the test, with both values cleared on both sides
+    """
+    os.environ.pop("CHESS_NICKNAME", None)
+    os.environ.pop("CHESS_LAST_MODE", None)
+    yield
+    os.environ.pop("CHESS_NICKNAME", None)
+    os.environ.pop("CHESS_LAST_MODE", None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_news_last_seen() -> Iterator[None]:
     """
     env.set_news_last_seen writes os.environ directly (not via monkeypatch), so

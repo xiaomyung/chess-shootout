@@ -98,6 +98,7 @@ class ResultMenu(BaseModal):
         self.stats: dict[str, Any] | None = None
         self.series: tuple[str, str, str] | None = None
         self.rematch_offered = False
+        self.rematch_withheld = False
         self.button_rects: dict[str, pg.Rect] = {}
         self.outcome_font = get_display_font(48)
         self.reason_font = get_font(12, bold=True)
@@ -167,11 +168,13 @@ class ResultMenu(BaseModal):
         """
         Choose which row of next steps the card offers, which is also what
         decides whether the series chip may show: every online face keeps it,
-        a local one never has one to keep
+        a local one never has one to keep. A new face starts with every button
+        it lists, so a Rematch withheld on the old one is offered again
 
         :param state: the face the card wears from now on
         """
         self.button_state = state
+        self.rematch_withheld = False
 
     def set_rematch_offered(self, offered: bool) -> None:
         """
@@ -184,6 +187,20 @@ class ResultMenu(BaseModal):
         """
         self.rematch_offered = offered
 
+    def set_rematch_withheld(self, withheld: bool) -> None:
+        """
+        Keep the player's own Rematch button off the online row after they
+        have turned the opponent's offer down, for the moment between that
+        answer and the server's word that the window has closed. Without it
+        the button would flash back into the very slot New Search is about to
+        take, and a click there would ask for a rematch the server is already
+        dropping
+
+        :param withheld: True to keep Rematch off the row until the face
+            changes
+        """
+        self.rematch_withheld = withheld
+
     def reset(self) -> None:
         """
         Clear the card completely between games. Every pre-board overlay has
@@ -193,6 +210,7 @@ class ResultMenu(BaseModal):
         self.set_result(None, "draw", "")
         self.button_rects = {}
         self.rematch_offered = False
+        self.rematch_withheld = False
 
     def is_visible(self) -> bool:
         """
@@ -401,7 +419,8 @@ class ResultMenu(BaseModal):
         Draw the row of what to do next, which differs by game: New Game
         locally, Rematch while the online session lives and New Search once it
         has closed, with Rematch dropped while the opponent's own offer is
-        standing and Open PGN dropped when nothing has been saved yet
+        standing or after the player has just declined one, and Open PGN
+        dropped when nothing has been saved yet
 
         :param content: usable area inside the shell, in window pixels
         """
@@ -409,7 +428,8 @@ class ResultMenu(BaseModal):
         gap = max(int(content.width * 0.02), 6)
         row = pg.Rect(content.x, content.bottom - btn_h, content.width, btn_h)
         buttons = BUTTONS_BY_STATE[self.button_state]
-        if self.button_state is ResultButtons.ONLINE and self.rematch_offered:
+        if (self.button_state is ResultButtons.ONLINE
+                and (self.rematch_offered or self.rematch_withheld)):
             buttons = [b for b in buttons if b[1] != "rematch"]
         if not self.pgn_available_provider():
             buttons = [b for b in buttons if b[1] != "open_pgn"]

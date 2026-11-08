@@ -59,7 +59,7 @@ from chessshootout.frontend.game.variant import MATCH_MODE_BY_VARIANT, Variant
 from chessshootout.skillcheck.combo import COMBO_DIRECTIONS, COMBO_PROMPT_COUNT_MAX
 from chessshootout.server.protocol import (
     CHAT_COOLDOWN_SECONDS, GRACE_SECONDS, IDLE_SECONDS_BY_OUTCOME, Reason,
-    SKILLCHECK_TARGET_MAX,
+    SKILLCHECK_TARGET_MAX, idle_window_seconds,
 )
 from chessshootout.online.client import RECONNECT_TOTAL_SECONDS
 
@@ -407,6 +407,7 @@ class GameScreen(Screen):
             session id and an optional starting FEN
         """
         openings.preload()
+        self.result_flow.reset_series()
         fen = payload.get("fen")
         side = payload.get("side")
         your_color = payload.get("your_color")
@@ -572,7 +573,10 @@ class GameScreen(Screen):
         raw_color = payload.get("color")
         if outcome not in IDLE_SECONDS_BY_OUTCOME or raw_color not in ("white", "black"):
             return
-        total = float(IDLE_SECONDS_BY_OUTCOME[outcome])
+        if self._time_control is not None:
+            total = idle_window_seconds(outcome, float(self._time_control[0]))
+        else:
+            total = float(IDLE_SECONDS_BY_OUTCOME[outcome])
         seconds = min(
             max(cast(float, _finite_float(payload.get("seconds_remaining"), 0.0)), 0.0), total)
         color = PieceColor.WHITE if raw_color == "white" else PieceColor.BLACK
@@ -2190,11 +2194,13 @@ class GameScreen(Screen):
     def _current_round(self) -> int:
         """
         Which game of the series this is, counted from the points already
-        shared out between the two players. Offline games have no series, so
-        this stays at one
+        shared out between the two players. Only online games have a series,
+        so every other variant stays at one
 
         :returns: the round number, starting at one
         """
+        if self.variant != Variant.ONLINE:
+            return 1
         total = (self.result_flow.series_score("white")
                  + self.result_flow.series_score("black"))
         return int(total) + 1

@@ -9,7 +9,7 @@ from tests.conftest import pygame_display
 from tests.helpers import make_app, start_single_screen
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.modals.result import (
-    BUTTONS, ONLINE_CLOSED_BUTTONS, ResultButtons, ResultMenu)
+    BUTTONS, ONLINE_BUTTONS, ONLINE_CLOSED_BUTTONS, ResultButtons, ResultMenu)
 from chessshootout.frontend.visual.colors import Colors
 from chessshootout.frontend.visual.widgets import BUTTON_LABEL_PADDING_PX, fit_text_to_rect
 
@@ -258,3 +258,56 @@ def test_detail_font_is_ready_before_the_first_layout_pass():
     died on AttributeError."""
     menu = _make_menu()
     assert isinstance(menu.detail_font, pg.font.Font)
+
+
+# --- #99: the decliner's Rematch is withheld until the server echoes the close
+
+def _online_menu(state=ResultButtons.ONLINE):
+    callbacks = {key: _no_op for _, key in ONLINE_BUTTONS + ONLINE_CLOSED_BUTTONS}
+    menu = ResultMenu(pg.display.get_surface(), callbacks, lambda: True)
+    menu.set_rect(pg.Rect(0, 0, 440, 418))
+    menu.set_buttons(state)
+    menu.set_result("DEFEAT", "loss", "Resignation · 20 moves", _stats())
+    return menu
+
+
+def test_a_withheld_rematch_stays_off_the_online_row():
+    menu = _online_menu()
+    menu.set_rematch_withheld(True)
+    menu.draw()
+    assert set(menu.button_rects) == {"open_pgn", "menu"}
+    menu.set_rematch_withheld(False)
+    menu.draw()
+    assert "rematch" in menu.button_rects
+
+
+def test_a_withheld_rematch_is_independent_of_the_opponents_offer():
+    menu = _online_menu()
+    menu.set_rematch_offered(True)
+    menu.set_rematch_withheld(True)
+    menu.set_rematch_offered(False)
+    menu.draw()
+    assert "rematch" not in menu.button_rects, "clearing the offer does not bring it back"
+
+
+def test_a_new_face_offers_rematch_again():
+    menu = _online_menu()
+    menu.set_rematch_withheld(True)
+    menu.set_buttons(ResultButtons.ONLINE)
+    assert menu.rematch_withheld is False
+    menu.draw()
+    assert "rematch" in menu.button_rects
+
+
+def test_reset_clears_a_withheld_rematch():
+    menu = _online_menu()
+    menu.set_rematch_withheld(True)
+    menu.reset()
+    assert menu.rematch_withheld is False
+
+
+def test_a_withheld_rematch_never_touches_the_closed_face():
+    menu = _online_menu(ResultButtons.ONLINE_CLOSED)
+    menu.set_rematch_withheld(True)
+    menu.draw()
+    assert set(menu.button_rects) == {"new_search", "open_pgn", "menu"}

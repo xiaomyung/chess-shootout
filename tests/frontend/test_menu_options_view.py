@@ -1369,3 +1369,27 @@ def test_the_probe_runs_on_a_daemon_thread_with_the_resolved_address(app, view, 
     assert created[0].args[0] == "typed.example:9"
     created[0].run_now()
     assert calls == [("typed.example:9", HEALTHZ_TIMEOUT_SECONDS)]
+
+
+# --- #99 side-change bug 4: leaving Options re-applied the defaults every time
+
+def test_leaving_options_keeps_a_time_picked_on_the_play_view():
+    app = make_app(1200, 900)
+    hero = app.menu.play_view
+    hero.selected_time_minutes, hero.selected_increment_seconds = 1, 0
+
+    app.menu.views["options"].exit()
+
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (1, 0)
+
+
+def test_a_default_changed_in_options_reaches_the_play_view(monkeypatch):
+    app = make_app(1200, 900)
+    hero = app.menu.play_view
+    hero.selected_time_minutes, hero.selected_increment_seconds = 1, 0
+    monkeypatch.setenv("CHESS_DEFAULT_TC", "15")
+    monkeypatch.setenv("CHESS_DEFAULT_INCREMENT", "10")
+
+    app.menu.views["options"].exit()
+
+    assert (hero.selected_time_minutes, hero.selected_increment_seconds) == (15, 10)

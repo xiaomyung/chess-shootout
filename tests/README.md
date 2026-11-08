@@ -40,7 +40,10 @@ Tests mirror the source layout, five dirs under `tests/`:
   (`test_skillcheck_juice.py`), with `test_skillcheck_session_kinds.py` driving
   all four kinds through a session and `test_effects_whack_gun.py` covering the
   held-gun choreography a whack check drives on the board), focus mode, audio
-  dispatch. Flat — no `tests/frontend/board/` subdirs.
+  dispatch, and the window lifecycle (minimize/restore in
+  `test_window_minimize.py`, the minimum-size clamp in `test_window_resize.py`,
+  degenerate surface sizes in `test_supersample_bounds.py`). Flat — no
+  `tests/frontend/board/` subdirs.
 - `tests/server/` — the `chessshootout/server/` package (FastAPI app,
   handlers, rooms, sweep, protocol — the wire models' own field bounds live in
   `test_server_protocol.py`, the heartbeat transit window and the two-strike
@@ -54,7 +57,12 @@ Tests mirror the source layout, five dirs under `tests/`:
   and monkeypatch targets moved to the new homes.
 - `tests/online/` — client-side online multiplayer: the top-level
   `chessshootout/online/` package (`OnlineClient`, `ServerTransport`) plus
-  `chessshootout/frontend/online_coordinator.py` and the offer banners.
+  `chessshootout/frontend/online_coordinator.py` and the offer banners. 
+  `test_online_matchmake_abort.py` drives a new search or a cancel racing a
+  pairing over `TestClient` websockets;
+  `test_online_rematch_decline_integration.py` runs two whole `Frontend`s in one
+  process against a real server, seat-switched per frame, through a declined
+  rematch and back into a fresh search.
 - `tests/infra/` — cross-cutting app lifecycle/config: `paths`, `env`,
   `countries`, `icons`, `log_format`, `crash_log`, `migration`, `utf8`, plus
   whole-repo static guards (`imports`, `logging_hygiene`,

@@ -13,7 +13,8 @@ import chessshootout.frontend.menu.time_picker as time_picker
 from chessshootout.frontend.menu.time_picker import (
     CHAMBER_RING_FRAC, CHAMBERS, CHAMBER_RADIUS_FRAC, CHAMBER_STEP_DEG,
     DRAG_CLICK_THRESHOLD_DEG, INCREMENTS, ROTATION_MS, ROULETTE_MAX_DEG_PER_S,
-    ROULETTE_MIN_DEG_PER_S, HUB_HIT_RADIUS_FRAC, SEAT_POP_MS, SETTLE_MS, TimePicker)
+    ROULETTE_MIN_DEG_PER_S, HUB_HIT_RADIUS_FRAC, SEAT_POP_MS, SETTLE_MS, TIMED_MINUTES,
+    TimePicker)
 from chessshootout.frontend.visual.colors import Colors
 
 
@@ -689,3 +690,121 @@ def test_spinning_drum_hides_the_hub_ring():
     rs, gs, bs = surface.get_at(probe)[:3]
     assert ri > 100 and ri > bi
     assert not (rs > 100 and rs > bs), "no invitation ring while the drum is in motion"
+
+
+# --- the untimed chamber can be locked (online games always have a clock)
+
+UNTIMED = next(i for i, (minutes, _) in enumerate(CHAMBERS) if minutes is None)
+
+
+def test_timed_minutes_are_the_chambers_minus_infinity():
+    assert TIMED_MINUTES == tuple(v for v, _ in CHAMBERS if v is not None)
+    assert None not in TIMED_MINUTES
+
+
+def test_a_locked_untimed_chamber_ignores_a_click():
+    changes = []
+    p = TimePicker(on_change=lambda: changes.append(1))
+    p.set_rect(pg.Rect(0, 0, 300, 190))
+    p.set_selection(10, 5)
+    p.set_untimed_allowed(False)
+
+    assert p.handle_click(p.chamber_center(UNTIMED)) is True, "the drum still takes the click"
+    _settle(p)
+
+    assert p.selected_minutes == 10
+    assert p.selected_increment == 5
+    assert changes == []
+
+
+def test_a_locked_chamber_does_not_block_its_neighbours():
+    p = _picker(10, 5)
+    p.set_untimed_allowed(False)
+    p.handle_click(p.chamber_center(5))
+    _settle(p)
+    assert p.selected_minutes == 30
+    p.handle_click(p.chamber_center(0))
+    _settle(p)
+    assert p.selected_minutes == 1
+
+
+def test_set_selection_cannot_seat_a_locked_untimed_chamber():
+    p = _picker(10, 5)
+    p.set_untimed_allowed(False)
+    p.set_selection(None, 0)
+    assert p.selected_minutes == 10
+    assert p.selected_increment == 0, "the increment still follows the request"
+
+
+def test_set_selection_seats_the_untimed_chamber_once_unlocked():
+    p = _picker(10, 5)
+    p.set_untimed_allowed(False)
+    p.set_untimed_allowed(True)
+    p.set_selection(None, 5)
+    assert p.selected_minutes is None
+    assert p.selected_increment == 0
+
+
+def test_a_roulette_never_settles_on_a_locked_chamber(monkeypatch):
+    """The same seeded roll lands on infinity when the chamber is free (pinned
+    above); locked, the drum comes to rest on a timed neighbour and the
+    turret's roll is kept, since nothing deadened it."""
+    p = _picker(10, 5)
+    p.set_untimed_allowed(False)
+    _seed_roulette(monkeypatch, 1500.0, direction=1.0, turret_index=4)
+    p.handle_click(p._drum_center)
+    _run_to_rest(p)
+    assert p.selected_minutes in TIMED_MINUTES
+    assert p._min_index in (UNTIMED - 1, (UNTIMED + 1) % len(CHAMBERS))
+    assert p.selected_increment == INCREMENTS[4]
+
+
+def test_a_wheel_spin_never_settles_on_a_locked_chamber():
+    p = _picker(30, 5)
+    p.set_untimed_allowed(False)
+    for _ in range(12):
+        assert p.handle_scroll(p._drum_center, 1) is True
+        _run_to_rest(p)
+        assert p.selected_minutes in TIMED_MINUTES
+
+
+def test_unlocking_restores_the_untimed_chamber():
+    p = _picker(10, 5)
+    p.set_untimed_allowed(False)
+    p.handle_click(p.chamber_center(UNTIMED))
+    _settle(p)
+    assert p.selected_minutes == 10
+    p.set_untimed_allowed(True)
+    p.handle_click(p.chamber_center(UNTIMED))
+    _settle(p)
+    assert p.selected_minutes is None
+    assert p.selected_increment == 0
+
+
+def _drum_render(locked):
+    surface = pg.Surface((300, 190))
+    surface.fill(pg.Color(Colors.surface_raised))
+    p = _picker(10, 5)
+    p.set_untimed_allowed(not locked)
+    p.draw(surface, 0)
+    return p, surface
+
+
+def test_a_locked_chamber_is_drawn_in_muted_ink_and_nothing_else_changes():
+    p, free = _drum_render(locked=False)
+    _, locked = _drum_render(locked=True)
+    lx, ly = p.chamber_center(UNTIMED)
+    bore = int(p._radius * CHAMBER_RADIUS_FRAC)
+    differs_in_bore = any(
+        free.get_at((x, y)) != locked.get_at((x, y))
+        for x in range(int(lx) - bore, int(lx) + bore)
+        for y in range(int(ly) - bore, int(ly) + bore))
+    assert differs_in_bore, "the locked infinity sign is drawn differently"
+    for i in range(len(CHAMBERS)):
+        if i == UNTIMED:
+            continue
+        cx, cy = p.chamber_center(i)
+        for dx in range(-bore, bore, 3):
+            for dy in range(-bore, bore, 3):
+                assert free.get_at((int(cx) + dx, int(cy) + dy)) == \
+                    locked.get_at((int(cx) + dx, int(cy) + dy))

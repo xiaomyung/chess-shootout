@@ -565,6 +565,9 @@ class FakeOnlineClient:
         self.shot_calls: list[tuple[float, str | None, float | None, float | None]] = []
         self.state_syncs = 0
         self.pings = 0
+        self.resigns = 0
+        self.draw_offers = 0
+        self.rematch_responses: list[bool] = []
         self.last_shot_elapsed: float | None = None
         self.last_shot_direction: str | None = None
         self.last_shot_target: tuple[float | None, float | None] | None = None
@@ -707,10 +710,26 @@ class FakeOnlineClient:
 
     def send_rematch_response(self, accept: bool) -> None:
         """
-        Swallow the player's answer to a rematch offer
+        Record the player's answer to a rematch offer, so a test can check the
+        decline really travelled while the card kept its own Rematch hidden
 
         :param accept: True when the offer was accepted
         """
+        self.rematch_responses.append(accept)
+
+    def send_resign(self) -> None:
+        """
+        Count a resignation instead of sending one, so a test can assert the
+        game went to the server to be settled rather than ending on the board
+        """
+        self.resigns += 1
+
+    def send_draw_offer(self) -> None:
+        """
+        Count a draw offer instead of sending one, so a test can assert the
+        offer went to the server rather than being agreed on the board
+        """
+        self.draw_offers += 1
 
 
 def online_app(your_color: str = "white") -> "Frontend":
