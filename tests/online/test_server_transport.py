@@ -671,6 +671,10 @@ async def test_server_websocket_send_move_round_trip(server):
         assert applied_a["type"] == "move_applied"
         assert applied_a["san"] == "e4"
         assert applied_b["from"] == "e2"
+        # Black replies first: a resignation before both sides moved is an abort.
+        await ws_b.send_move("e7", "e5")
+        assert (await _recv_skip_beacons(ws_a))["san"] == "e5"
+        assert (await _recv_skip_beacons(ws_b))["san"] == "e5"
         await ws_a.send_resign()
         result_a = await _recv_skip_beacons(ws_a)
         assert result_a["type"] == "result"

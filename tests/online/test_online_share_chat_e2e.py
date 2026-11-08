@@ -139,6 +139,13 @@ def test_post_result_chat_and_annotations_are_noops(server):
     """Once the game is over, quick-chat and annotation frames are server-side
     noops: neither is relayed to the opponent."""
     _addr, a, b = _pair(server, DONE_WHITE, DONE_BLACK)
+    # Both sides move first: a resignation before that is a pregame abort.
+    a.send_move("e2", "e4")
+    assert wait_for(a, "move_applied").payload["san"] == "e4"
+    assert wait_for(b, "move_applied").payload["san"] == "e4"
+    b.send_move("e7", "e5")
+    assert wait_for(a, "move_applied").payload["san"] == "e5"
+    assert wait_for(b, "move_applied").payload["san"] == "e5"
 
     a.send_resign()
     a_result = wait_for(a, "result")

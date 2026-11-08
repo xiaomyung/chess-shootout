@@ -98,7 +98,9 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
     colors underneath a connection that never dropped. Oversized frames close
     the socket outright, a flood is answered with an error frame instead of
     being processed, and a handler that fails outright costs the sender an
-    error frame rather than their connection
+    error frame rather than their connection. When the socket goes, the
+    opponent hears that this player is reconnecting -- unless the room was
+    already dropped, since nobody is coming back to a room that is gone
 
     :param app: application holding the rooms, sockets and clock
     :param websocket: accepted socket for this player
@@ -196,7 +198,7 @@ async def _ws_session(app: FastAPI, websocket: WebSocket, room_id: str) -> None:
             log.info("ws disconnected room=%s color=%s",
                      room.room_id, exit_color)
             opp_ws = connections.get_for_color(room, room.opp_color(exit_color))
-            if opp_ws is not None:
+            if opp_ws is not None and rooms.is_live(room):
                 msg = (ConnectionStatusMessage(opp_state="reconnecting")
                        if room.result is None
                        else RematchUpdateMessage(event="opponent_reconnecting"))

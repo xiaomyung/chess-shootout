@@ -172,6 +172,26 @@ def build_http_router(
                                 detail={"reason": Reason.CLIENT_OUTDATED,
                                         "min_version": MIN_CLIENT_VERSION})
 
+    async def _leave_finished_room(finished: Room, client_uuid: str) -> None:
+        """
+        Walk a player out of a game that is over, on their way to a new search
+        or out of a pairing they cancelled: the old opponent is told they have
+        left, and the room is let go so the player is free to be seated again.
+        The release is checked again after telling the opponent, because a
+        rematch could have restarted the room in the meantime, and then the
+        player stays put rather than being torn out of a live game
+
+        :param finished: the finished room the player is still attached to
+        :param client_uuid: the leaving player's stable id
+        """
+        fin_color = finished.color_of(client_uuid)
+        if fin_color is not None:
+            opp_ws = connections.get_for_color(finished, finished.opp_color(fin_color))
+            if opp_ws is not None:
+                await send(opp_ws, RematchUpdateMessage(event="opponent_left"))
+        if rooms.finished_room_for(client_uuid) is finished:
+            rooms.release_for_new_game(client_uuid)
+
     @router.get("/")
     async def root() -> dict[str, Any]:
         """
@@ -235,10 +255,13 @@ def build_http_router(
         """
         Ask to be paired for an online game. Someone already waiting on the same
         time control is matched immediately; otherwise the request holds a place
-        until an opponent arrives. Any game or waiting place the same player
-        still holds is given up first, so a player is only ever in one game. A
-        build that speaks another protocol version, or one older than this
-        server accepts, is turned away before any of that happens
+        until an opponent arrives. A player is only ever in one game, so whatever
+        they still hold is given up first: a waiting place is released, a game in
+        which a side has yet to move is called off with no winner, a game in
+        which both sides have moved is lost, and the opponent of any game left
+        behind is told the player has gone. A build that speaks another protocol
+        version, or one older than this server accepts, is turned away before
+        any of that happens
 
         :param request: the incoming HTTP request; the endpoint itself reads
             only the body
@@ -251,22 +274,20 @@ def build_http_router(
         log.info("matchmake nickname=%s uuid=%s tc=%s+%s side=%s",
                  body.nickname, body.client_uuid[:8],
                  body.time_minutes, body.increment_seconds, body.side_preference)
+        unstarted = rooms.unstarted_room_for(body.client_uuid)
+        if unstarted is not None:
+            log.info("matchmake aborts room=%s", unstarted.room_id)
+            await finalize_and_broadcast(rooms, connections, unstarted, Reason.ABORTED)
         prior = rooms.in_progress_room_for(body.client_uuid)
         if prior is not None:
             prior_room, prior_color = prior
             log.info("matchmake abandons room=%s color=%s", prior_room.room_id, prior_color)
             await finalize_and_broadcast(rooms, connections, prior_room, Reason.ABANDONMENT,
                                          winner_color=prior_room.opp_color(prior_color))
-            rooms.release_for_new_game(body.client_uuid)
         finished = rooms.finished_room_for(body.client_uuid)
         if finished is not None:
-            fin_color = finished.color_of(body.client_uuid)
-            if fin_color is not None:
-                opp_ws = connections.get_for_color(finished, finished.opp_color(fin_color))
-                if opp_ws is not None:
-                    await send(opp_ws, RematchUpdateMessage(event="opponent_left"))
             log.info("matchmake leaves finished room=%s", finished.room_id)
-            rooms.release_for_new_game(body.client_uuid)
+            await _leave_finished_room(finished, body.client_uuid)
         queued = rooms.queued_room_for(body.client_uuid)
         if queued is not None:
             log.info("matchmake releases queue slot room=%s", queued.room_id)
@@ -303,13 +324,17 @@ def build_http_router(
                                body: CancelMatchmakeRequest) -> dict[str, str]:
         """
         Withdraw a player who is still waiting to be paired, freeing their place
-        in the queue. A game that has already started cannot be withdrawn from
-        this way, and the answer says so rather than failing
+        in the queue. A player who was paired a moment before the request
+        arrived, in a game nobody has moved in yet, is withdrawn as well: that
+        game is called off with no winner and the opponent is told the player
+        has gone. A game already under way cannot be withdrawn from this way,
+        and the answer says so rather than failing
 
         :param request: the incoming HTTP request; the endpoint itself reads
             only the body
         :param body: the room the player was placed in and their session token
-        :returns: a status of ok, or already_started when the game had begun
+        :returns: a status of ok once the player is withdrawn, or already_started
+            when the game had begun
         """
         try:
             await rooms.cancel_wait(body.room_id, body.session_token)
@@ -318,8 +343,16 @@ def build_http_router(
         except InvalidTokenError:
             raise HTTPException(status_code=401, detail={"reason": Reason.SESSION_EXPIRED})
         except GameAlreadyStartedError:
-            log.info("cancel ignored room=%s reason=game_already_started", body.room_id)
-            return {"status": "already_started"}
+            seat = rooms.unstarted_seat_by_token(body.room_id, body.session_token)
+            if seat is None:
+                log.info("cancel ignored room=%s reason=game_already_started", body.room_id)
+                return {"status": "already_started"}
+            paired, slot = seat
+            log.info("cancel aborts room=%s", paired.room_id)
+            await finalize_and_broadcast(rooms, connections, paired, Reason.ABORTED)
+            if rooms.finished_room_for(slot.client_uuid) is paired:
+                await _leave_finished_room(paired, slot.client_uuid)
+            return {"status": "ok"}
         log.info("cancel ok room=%s", body.room_id)
         return {"status": "ok"}
 
@@ -351,8 +384,8 @@ def build_http_router(
         dead = room.pending_skillcheck
         if dead is not None and dead.is_dead(now_ms()):
             await resolve_skillcheck_fail(rooms, connections, room)
-        if room.backend is not None:
-            room.backend.tick_clock()
+        if room.clock_runs():
+            cast(Backend, room.backend).tick_clock()
         history = [
             HistoryEntryWire(
                 from_sq=coord_from_square(entry.move.from_sq),

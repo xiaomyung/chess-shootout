@@ -169,6 +169,7 @@ class RecordingWS:
 
 
 async def pair_room(rooms: RoomManager, *, time_minutes: int = 5,
+                    increment_seconds: int = 0,
                     tokens: tuple[str, str] = ("ta", "tb")) -> Room:
     """
     Seat both test players on the same time control so they pair into one live
@@ -176,15 +177,18 @@ async def pair_room(rooms: RoomManager, *, time_minutes: int = 5,
     that need sockets, a clock stamp or a particular board add those on top
 
     :param rooms: the room manager to enqueue into
-    :param time_minutes: base minutes per side, also the queue key
+    :param time_minutes: base minutes per side, half of the queue key
+    :param increment_seconds: seconds added per move, the other half, so a
+        bullet game with an increment can be built as well as a plain one
     :param tokens: session tokens for the white and black seat, in that order
     :returns: the room both players now hold a seat in
     """
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token=tokens[0],
-                        time_minutes=time_minutes, increment_seconds=0,
+                        time_minutes=time_minutes, increment_seconds=increment_seconds,
                         side_preference="white")
     return await rooms.enqueue(client_uuid=BOB, nickname="B", session_token=tokens[1],
-                               time_minutes=time_minutes, increment_seconds=0,
+                               time_minutes=time_minutes,
+                               increment_seconds=increment_seconds,
                                side_preference="black")
 
 

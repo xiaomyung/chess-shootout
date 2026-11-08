@@ -8,6 +8,8 @@ gives up, so a tight poll would time out before a transient first attempt
 recovers."""
 import time
 
+import pytest
+
 from chessshootout.online.client import OnlineClient
 from tests.helpers import fake_uuid4
 from tests.online.online_helpers import wait_for
@@ -83,6 +85,10 @@ def test_resign_broadcasts_result_to_both_clients(server):
     a.send_move("e2", "e4")
     wait_for(a, "move_applied")
     wait_for(b, "move_applied")
+    # Black replies first: a resignation before both sides moved is an abort.
+    b.send_move("e7", "e5")
+    assert wait_for(a, "move_applied").payload["san"] == "e5"
+    assert wait_for(b, "move_applied").payload["san"] == "e5"
     a.send_resign()
     a_result = wait_for(a, "result")
     b_result = wait_for(b, "result")
@@ -120,5 +126,34 @@ def test_online_rematch_swaps_colors(server):
     assert a_game2.payload["your_color"] == "black"
     assert b_game2.payload["your_color"] == "white"
 
+    a.disconnect()
+    b.disconnect()
+
+
+@pytest.mark.parametrize("plies", [0, 1], ids=["nobody_moved", "only_white_moved"])
+def test_a_resign_before_both_sides_moved_comes_back_aborted_to_both(server, plies):
+    """The pregame rule over real sockets: a resignation before both sides have
+    moved is sent like any other, and the server answers both players with a
+    no-winner abort rather than a win -- so neither card scores it."""
+    addr = f"localhost:{server}"
+    a = OnlineClient()
+    a.connect(addr, {"nickname": "Alice", "client_uuid": fake_uuid4(21 + plies * 2),
+                     "time_minutes": 5, "increment_seconds": 0,
+                     "side_preference": "white"})
+    b = OnlineClient()
+    b.connect(addr, {"nickname": "Bob", "client_uuid": fake_uuid4(22 + plies * 2),
+                     "time_minutes": 5, "increment_seconds": 0,
+                     "side_preference": "black"})
+    assert wait_for(a, "game_start").payload["your_color"] == "white"
+    assert wait_for(b, "game_start").payload["your_color"] == "black"
+    if plies:
+        a.send_move("e2", "e4")
+        assert wait_for(b, "move_applied").payload["san"] == "e4"
+    a.send_resign()
+    for client in (a, b):
+        result = wait_for(client, "result")
+        assert result is not None
+        assert result.payload["reason"] == "aborted"
+        assert result.payload["winner_color"] is None
     a.disconnect()
     b.disconnect()

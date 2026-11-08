@@ -8,6 +8,7 @@ pinned end to end alongside every close condition.
 import json
 
 import pytest
+from fastapi import WebSocketDisconnect
 
 from chessshootout.server.handlers import (
     handle_left_result, handle_move, handle_rematch_request, handle_rematch_response,
@@ -16,7 +17,8 @@ from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
 from chessshootout.server.rooms import (
     POST_GAME_DISCONNECT_GRACE, REMATCH_ABSOLUTE_CAP_SECONDS, REMATCH_IDLE_SECONDS,
 )
-from tests.server.conftest import ALICE, BOB
+from chessshootout.server.ws_session import _ws_session
+from tests.server.conftest import ALICE, BOB, RecordingWS, auth_msg
 
 
 class FakeWS:
@@ -33,13 +35,18 @@ class FakeWS:
         return [m["event"] for m in self.sent if m.get("type") == "rematch_update"]
 
 
-async def _finished_room(app, *, connect_a=True, connect_b=True):
+async def _finished_room(app, *, connect_a=True, connect_b=True, finish=True):
     rooms = app.state.rooms
     connections = app.state.connections
     await rooms.enqueue(client_uuid=ALICE, nickname="A", session_token="ta",
                         time_minutes=5, increment_seconds=0, side_preference="white")
     room = await rooms.enqueue(client_uuid=BOB, nickname="B", session_token="tb",
                                time_minutes=5, increment_seconds=0, side_preference="black")
+    if not finish:
+        ws_b = FakeWS()
+        rooms.mark_connected(room.room_id, room.color_of(BOB))
+        connections.add(room.room_id, BOB, ws_b)
+        return room, None, ws_b
     room.first_move_at = app.state.now()
     ws_a = ws_b = None
     if connect_a:
@@ -379,3 +386,126 @@ async def test_sweep_absolute_cap_drops_and_notifies_both_present(app, clock):
     assert rooms.rooms_active == 0
     assert "window_expired" in ws_a.events()
     assert "window_expired" in ws_b.events()
+
+
+@pytest.mark.asyncio
+async def test_a_rematch_request_on_a_dropped_room_is_unavailable(app):
+    """REGRESSION: a room dropped by a reap still has both seats marked at the
+    result screen and no offers, so an offer sent on the socket that outlived it
+    used to be accepted -- relayed to an opponent whose socket was still filed
+    under the dead room id, and answered with a waiting toast for a game that
+    could never start. A dropped room now answers rematch_unavailable."""
+    room, ws_a, ws_b = await _finished_room(app)
+    app.state.rooms.drop_room_now(room.room_id)
+    sent_to_bob = len(ws_b.sent)
+
+    assert await _offer(app, room, ws_a, ALICE) == "unavailable"
+
+    errs = [m for m in ws_a.sent if m.get("type") == "error"]
+    assert [(e["reason"], e["msg_type"]) for e in errs] == [
+        (Reason.REMATCH_UNAVAILABLE, "rematch_request")]
+    assert room.rematch_offered_by == set()
+    assert len(ws_b.sent) == sent_to_bob, "the offerer side hears nothing at all"
+
+
+@pytest.mark.asyncio
+async def test_the_decliners_late_rematch_click_is_unavailable(app):
+    """The flow that exposed it: Bob declines Alice's offer, which drops the
+    room, then clicks Rematch on his card before the window_expired echo lands.
+    The click is refused and Alice, already told 'declined', hears nothing more."""
+    room, ws_a, ws_b = await _finished_room(app)
+    await _offer(app, room, ws_a, ALICE)
+    assert await _respond(app, room, ws_b, BOB, False) == "declined"
+    sent_to_alice = len(ws_a.sent)
+
+    assert await _offer(app, room, ws_b, BOB) == "unavailable"
+
+    assert ws_b.sent[-1]["reason"] == Reason.REMATCH_UNAVAILABLE
+    assert len(ws_a.sent) == sent_to_alice
+
+
+@pytest.mark.asyncio
+async def test_a_decline_on_a_dropped_room_is_unavailable_and_sends_no_echo(app):
+    """The answer side of the same guard: a reap that drops a room with an offer
+    still standing leaves an answer to act on. A decline then must not re-run
+    the decline broadcast for a room that is already gone -- it is told the
+    rematch is gone, and the offerer hears nothing."""
+    room, ws_a, ws_b = await _finished_room(app)
+    await _offer(app, room, ws_a, ALICE)
+    app.state.rooms.drop_room_now(room.room_id)
+    sent_to_alice = len(ws_a.sent)
+
+    assert await _respond(app, room, ws_b, BOB, False) == "unavailable"
+
+    assert ws_b.sent[-1]["reason"] == Reason.REMATCH_UNAVAILABLE
+    assert ws_b.sent[-1]["msg_type"] == "rematch_response"
+    assert ws_b.events() == []
+    assert len(ws_a.sent) == sent_to_alice
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_room_with_the_offerer_away_is_unavailable_not_deferred(app):
+    """Without the guard an accept on a dropped room whose offerer had gone was
+    deferred -- 'opponent_reconnecting' for a player who has no room left to
+    come back to. The dead room is named as such before any deferral."""
+    room, ws_a, ws_b = await _finished_room(app)
+    await _offer(app, room, ws_a, ALICE)
+    app.state.connections.remove(room.room_id, ALICE, ws_a)
+    app.state.rooms.drop_room_now(room.room_id)
+
+    assert await _respond(app, room, ws_b, BOB, True) == "unavailable"
+
+    assert "opponent_reconnecting" not in ws_b.events()
+    assert ws_b.sent[-1]["reason"] == Reason.REMATCH_UNAVAILABLE
+
+
+class _HangUpWS(RecordingWS):
+    """A socket that authenticates, lets the test act on the room while it is
+    still connected, then hangs up -- which is what runs ws_session's finally."""
+
+    def __init__(self, token, on_hangup):
+        super().__init__()
+        self._frames = [json.dumps(auth_msg(token))]
+        self._on_hangup = on_hangup
+
+    async def receive_text(self):
+        if self._frames:
+            return self._frames.pop(0)
+        self._on_hangup()
+        raise WebSocketDisconnect()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finished", [True, False], ids=["post_game", "live_game"])
+@pytest.mark.parametrize("dropped", [True, False], ids=["dropped", "still_held"])
+async def test_a_socket_closing_tells_the_opponent_only_while_the_room_lives(
+    app, finished, dropped,
+):
+    """REGRESSION: after a decline (or a reap) dropped the room, the decliner's
+    late socket close still found the offerer's socket filed under the dead
+    room id and told them 'opponent_reconnecting' -- about a room neither of
+    them is in. The socket is still unfiled either way; only the notice to the
+    opponent depends on the room still being held. A held room keeps both
+    notices: the post-game reconnecting event and the live-game status."""
+    rooms = app.state.rooms
+    room, _, ws_b = await _finished_room(app, connect_a=False, finish=finished)
+
+    def hang_up():
+        if dropped:
+            rooms.drop_room_now(room.room_id)
+
+    alice_ws = _HangUpWS("ta", hang_up)
+    await _ws_session(app, alice_ws, room.room_id)
+    assert alice_ws.sent, "the session authenticated before it hung up"
+
+    assert app.state.connections.get_for_uuid(room.room_id, ALICE) is None
+    notices = [m for m in ws_b.sent
+               if m.get("event") == "opponent_reconnecting"
+               or (m.get("type") == "connection_status"
+                   and m.get("opp_state") == "reconnecting")]
+    if dropped:
+        assert notices == []
+    else:
+        assert len(notices) == 1
+        assert notices[0]["type"] == ("rematch_update" if finished
+                                      else "connection_status")
