@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from chessshootout.backend.pieces import PieceColor
 from chessshootout.backend.utils import Square
 from chessshootout.frontend.menu.time_picker import CHAMBERS
 from chessshootout.server.app import create_app
@@ -180,24 +181,83 @@ async def test_ply_one_silence_ends_aborted_never_on_time_at_every_chamber(
     assert room.backend.clock.black_remaining > 0
 
 
+def _take_back_to_empty(room, clock, plies):
+    """Play `plies` stock plies, then rewind every one the way an accepted
+    takeback does: undo, then re-anchor the clock at the rewind."""
+    play_plies(room, plies)
+    room.plies_ever = plies
+    for _ in range(plies):
+        room.backend.undo()
+    room.backend.clock.reanchor(clock())
+    assert room.backend.move_history == []
+
+
 @pytest.mark.asyncio
-async def test_a_board_taken_back_to_empty_is_not_charged_by_the_sweep(sweep, app, clock):
-    """The sweep's tick goes through Room.clock_runs: after the only move is
-    taken back the board is empty and neither side is charged, however long
-    the room sits."""
+async def test_a_board_taken_back_to_empty_at_ply_one_still_aborts(sweep, app, clock):
+    """The sweep keeps charging an empty board after a takeback, from the
+    rewind on, but at plies_ever=1 the abort window is half the clock at most,
+    so it fires first and the game ends with no winner."""
     room = await pair_room(app.state.rooms, time_minutes=1)
-    assert room.backend.try_move(Square(6, 4), Square(4, 4)).legal
     room.first_move_at = clock()
-    room.plies_ever = 1
-    room.backend.undo()
-    room.mark_idle_activity(None)
-    before = (room.backend.clock.white_remaining, room.backend.clock.black_remaining)
-    assert room.clock_runs() is False
-    clock.advance(50)
+    _take_back_to_empty(room, clock, 1)
+    room.mark_idle_activity(clock())
+    white_before = room.backend.clock.white_remaining
+    black_before = room.backend.clock.black_remaining
+    assert room.running_backend() is room.backend
+    window = room.idle_window()
+    assert window.outcome == Reason.ABORTED and window.seconds < white_before
+    clock.advance(10)
     await sweep.step_clock_and_idle_windows()
     assert room.result is None
-    assert (room.backend.clock.white_remaining,
-            room.backend.clock.black_remaining) == before
+    assert room.backend.clock.white_remaining == pytest.approx(white_before - 10)
+    assert room.backend.clock.black_remaining == black_before
+    clock.advance(window.seconds - 10)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.ABORTED, None)
+    assert room.backend.clock.flagged is None
+
+
+@pytest.mark.asyncio
+async def test_a_board_taken_back_to_empty_past_ply_two_flags_on_time(sweep, app, clock):
+    """REGRESSION: with three plies ever played no idle window arms, so a board
+    taken all the way back used to sit uncharged forever and hold its room.
+    The clock now runs from the takeback and the side to move flags."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    _take_back_to_empty(room, clock, 3)
+    assert room.idle_window() is None
+    white_left = room.backend.clock.white_remaining
+    for _ in range(int(white_left) - 1):
+        clock.advance(1)
+        await sweep.step_clock_and_idle_windows()
+        assert room.result is None
+    clock.advance(1)
+    await sweep.step_clock_and_idle_windows()
+    assert room.backend.clock.flagged == PieceColor.WHITE
+    assert room.result == (Reason.TIMEOUT, "black")
+
+
+@pytest.mark.asyncio
+async def test_a_board_taken_back_to_empty_at_ply_two_flags_with_the_shown_countdown(
+        sweep, app, clock):
+    """At plies_ever=2 the resign window is shown capped at the mover's clock;
+    on an empty board that clock now really runs, so the badge reaching zero
+    and the server's flag land on the same tick."""
+    room = await pair_room(app.state.rooms, time_minutes=1)
+    room.first_move_at = clock()
+    _take_back_to_empty(room, clock, 2)
+    room.backend.clock.white_remaining = 20.0
+    room.mark_idle_activity(clock())
+    assert room.idle_window().outcome == Reason.RESIGNATION
+    assert room.idle_display_remaining(clock()) == pytest.approx(20.0)
+    clock.advance(19)
+    await sweep.step_clock_and_idle_windows()
+    assert room.result is None
+    assert room.idle_display_remaining(clock()) == pytest.approx(1.0)
+    clock.advance(1)
+    assert room.idle_display_remaining(clock()) == 0.0
+    await sweep.step_clock_and_idle_windows()
+    assert room.result == (Reason.TIMEOUT, "black")
 
 
 @pytest.mark.asyncio

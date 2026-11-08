@@ -441,20 +441,24 @@ class Room:
         return IdleWindowSpec(
             spec.outcome, idle_window_seconds(spec.outcome, self.time_minutes * 60.0))
 
-    def clock_runs(self) -> bool:
+    def running_backend(self) -> Backend | None:
         """
-        Tell whether the side to move is being charged for their time right
-        now. The clock only runs once the first move has been made and while
-        there is a ply on the board, so a fresh pairing and a game taken all the
-        way back are left to the abort window rather than to the clock. A flag
+        Hand over the board whose side to move is being charged for their time
+        right now, for the sweep and a resume to tick. The clock runs from the
+        first move on, a board taken all the way back included: a takeback
+        restarts the countdown from the moment of the rewind, so the side put
+        back on move is charged only from then, and before both sides have
+        moved the abort window still settles the game with no winner. A flag
         that has already fallen still counts as running, so the game it ends
         is settled rather than left hanging
 
-        :returns: True when the sweep and a resume should tick the clock.
+        :returns: the backend to tick, or None before the first move and for a
+            board without a clock.
         """
         backend = self.backend
-        return (self.first_move_at is not None and backend is not None
-                and backend.clock is not None and bool(backend.move_history))
+        if self.first_move_at is None or backend is None or backend.clock is None:
+            return None
+        return backend
 
     def idle_remaining(self, now: float) -> float | None:
         """

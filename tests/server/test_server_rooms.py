@@ -1024,25 +1024,27 @@ async def test_a_bullet_abort_window_runs_out_at_thirty_seconds(manager, clock):
     assert room.idle_timeout_reason(30.0) == Reason.ABORTED
 
 
-async def test_clock_runs_only_with_a_first_move_and_a_ply_on_the_board(manager, clock):
-    """The one predicate the sweep and /resume tick through: a fresh pairing
-    and a board taken all the way back are not charged."""
-    assert _bare_room().clock_runs() is False, "no board, no clock"
+async def test_running_backend_only_from_the_first_move_on(manager, clock):
+    """The one predicate the sweep and /resume tick through: a fresh pairing is
+    not charged, while a board taken all the way back still is (the takeback
+    re-anchors the clock, so only time since the rewind is charged)."""
+    assert _bare_room().running_backend() is None, "no board, no clock"
     room = await _paired(manager)
-    assert room.clock_runs() is False, "nobody has moved yet"
+    assert room.running_backend() is None, "nobody has moved yet"
     room.first_move_at = clock()
-    assert room.clock_runs() is False, "stamped but the board is empty"
+    assert room.running_backend() is room.backend, "stamped first move"
     _play(room, ("e2", "e4"))
-    assert room.clock_runs() is True
+    assert room.running_backend() is room.backend
     room.backend.undo()
     assert room.backend.move_history == []
-    assert room.clock_runs() is False, "a takeback to an empty board stops the charge"
+    assert room.running_backend() is room.backend, "an empty board after a takeback runs"
     _play(room, ("e2", "e4"))
     room.first_move_at = None
-    assert room.clock_runs() is False, "moves on a board with no first-move stamp"
+    assert room.running_backend() is None, "moves on a board with no first-move stamp"
 
 
-async def test_clock_runs_keeps_a_flagged_clock_running_so_the_flag_settles(manager, clock):
+async def test_running_backend_keeps_a_flagged_clock_running_so_the_flag_settles(
+        manager, clock):
     """No flagged term: a flag latched outside the sweep (a /resume tick) must
     still reach the sweep's game_result and finalize as a timeout."""
     room = await _paired(manager, time_minutes=1)
@@ -1051,17 +1053,17 @@ async def test_clock_runs_keeps_a_flagged_clock_running_so_the_flag_settles(mana
     clock.advance(70)
     room.backend.tick_clock()
     assert room.backend.clock.flagged is not None
-    assert room.clock_runs() is True
+    assert room.running_backend() is room.backend
 
 
-async def test_clock_runs_is_false_for_a_board_without_a_clock(manager, clock):
+async def test_running_backend_is_none_for_a_board_without_a_clock(manager, clock):
     room = await _paired(manager)
     room.backend = Backend()
     room.backend.new_game()
     room.first_move_at = clock()
     _play(room, ("e2", "e4"))
     assert room.backend.clock is None
-    assert room.clock_runs() is False
+    assert room.running_backend() is None
 
 
 async def _ply_two_after_a_slow_first_move(manager, clock, minutes, think):

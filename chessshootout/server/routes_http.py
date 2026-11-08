@@ -384,8 +384,9 @@ def build_http_router(
         dead = room.pending_skillcheck
         if dead is not None and dead.is_dead(now_ms()):
             await resolve_skillcheck_fail(rooms, connections, room)
-        if room.clock_runs():
-            cast(Backend, room.backend).tick_clock()
+        running = room.running_backend()
+        if running is not None:
+            running.tick_clock()
         history = [
             HistoryEntryWire(
                 from_sq=coord_from_square(entry.move.from_sq),

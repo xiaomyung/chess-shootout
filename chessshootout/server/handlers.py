@@ -844,9 +844,9 @@ async def handle_takeback_response(app: FastAPI, websocket: WebSocket, room: Roo
     so the side put back on move is not charged for time spent before the
     rewind, drops the skill-check record for the ply that was popped, stamps
     the rewind so a heartbeat still in flight is read as such, and restarts
-    the idle countdown. A takeback that empties the
-    history leaves first_move_at alone -- the room is still a game in progress
-    -- and the sweep is what stops charging a board with nothing on it
+    the idle countdown. A takeback that empties the history leaves
+    first_move_at alone -- the room is still a game in progress, and its
+    clock keeps charging the side to move from the rewind on
 
     :param app: the FastAPI application, source of the shared server state.
     :param websocket: the socket the answer arrived on.
@@ -932,8 +932,7 @@ async def handle_give_time(app: FastAPI, websocket: WebSocket, room: Room, color
         clock=clock_snapshot(room.backend.clock),
     ))
     window = room.idle_window()
-    if (added > 0 and room.result is None and room.idle_since is not None
-            and window is not None and window.outcome == Reason.RESIGNATION
+    if (added > 0 and window is not None and window.outcome == Reason.RESIGNATION
             and opp_color_str == room.color_to_move()):
         await push_idle_window(rooms, connections, room, app.state.now(), force=True)
     return "granted" if added > 0 else "capped"

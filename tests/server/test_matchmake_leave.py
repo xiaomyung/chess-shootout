@@ -18,25 +18,9 @@ import random
 from contextlib import ExitStack
 
 import pytest
-from fastapi.testclient import TestClient
 
-from chessshootout.server.app import create_app
 from chessshootout.server.protocol import PROTOCOL_VERSION, Reason
-from tests.helpers import FakeClock, auth_msg, fake_uuid4
-
-
-ALICE = fake_uuid4(1)
-BOB = fake_uuid4(2)
-
-
-@pytest.fixture
-def app():
-    return create_app(now_provider=FakeClock(), max_rooms=8)
-
-
-@pytest.fixture
-def client(app):
-    return TestClient(app)
+from tests.server.conftest import ALICE, BOB, auth_msg
 
 
 def _matchmake(client, *, uuid, side, minutes=5):

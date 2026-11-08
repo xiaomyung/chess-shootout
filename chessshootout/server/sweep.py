@@ -3,8 +3,6 @@ from typing import cast
 
 from fastapi import WebSocketDisconnect
 
-from chessshootout.backend.backend import Backend
-
 from chessshootout.server import logging_setup
 from chessshootout.server.broadcasts import finalize_and_broadcast, resolve_skillcheck_fail
 from chessshootout.server.connections import ConnectionRegistry, send
@@ -218,15 +216,16 @@ class Sweep:
         time, and only then look at the idle countdowns. Flag-fall is settled
         first on purpose, so a clock running out in the same tick as an idle
         window wins and the game ends on time rather than on silence. Only a
-        room whose clock runs is charged, so a fresh pairing and a board taken
-        all the way back are left to the abort window, not the clock
+        room whose clock runs is charged: a fresh pairing is left to the abort
+        window, while a board taken all the way back keeps charging the side
+        to move from the moment of the takeback
         """
         for room in self.rooms.active_rooms():
             try:
                 if room.result is not None:
                     continue
-                if room.clock_runs():
-                    backend = cast(Backend, room.backend)
+                backend = room.running_backend()
+                if backend is not None:
                     backend.tick_clock()
                     game_result = backend.game_result()
                     if game_result in RESULT_REASON_BY_GAME_RESULT:

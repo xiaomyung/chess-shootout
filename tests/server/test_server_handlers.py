@@ -266,10 +266,12 @@ async def test_an_accepted_takeback_at_ply_one_restamps_the_abort_window(app, cl
         assert push["seconds_remaining"] == pytest.approx(FIRST_MOVE_ABORT_SECONDS)
 
 
-async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
-    """REGRESSION: an empty board kept charging the side to move -- at a short
-    time control the pair could flag before either had played. The sweep is
-    what stops it: no plies, no tick. first_move_at deliberately STAYS set,
+async def test_a_takeback_of_the_only_move_still_ends_in_an_abort(app, clock):
+    """REGRESSION: an empty board once kept charging the side to move from the
+    pre-takeback anchor -- at a short time control the pair could flag before
+    either had played. The takeback re-anchors, so the clock charges only from
+    the rewind, and the ply-1 abort window (half the clock at most) ends the
+    game with no winner before any flag. first_move_at deliberately STAYS set,
     because clearing it told in_progress_room_for, heartbeat_timed_out_rooms
     and step_drop_orphans_pre_game that a live room was still pre-game."""
     room, ws_w, ws_b = await _wired_room(app)
@@ -283,12 +285,15 @@ async def test_a_takeback_of_the_only_move_stops_the_clock_again(app, clock):
     assert room.first_move_at is not None
     assert app.state.rooms.in_progress_room_for(room.white.client_uuid) == (room, "white")
     assert not room.backend.move_history
-    remaining = (room.backend.clock.white_remaining, room.backend.clock.black_remaining)
+    white_before = room.backend.clock.white_remaining
+    black_before = room.backend.clock.black_remaining
     clock.advance(FIRST_MOVE_ABORT_SECONDS + 1)
     await app.state.sweep.step_clock_and_idle_windows()
 
-    assert (room.backend.clock.white_remaining,
-            room.backend.clock.black_remaining) == remaining
+    assert room.backend.clock.white_remaining == pytest.approx(
+        white_before - (FIRST_MOVE_ABORT_SECONDS + 1))
+    assert room.backend.clock.black_remaining == black_before
+    assert room.backend.clock.flagged is None
     assert room.result == (Reason.ABORTED, None)
 
 

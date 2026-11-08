@@ -325,11 +325,13 @@ class HealthStatus:
 
 class IdleWindowSpec(NamedTuple):
     """
-    One row of the idle-window table: what becomes of a game whose side to move
-    has gone silent, and how many seconds of silence are allowed first. Paired
-    with a ply count in IDLE_WINDOW_BY_PLIES, which names the outcome both the
-    sweep and the pushed countdown read; `seconds` is the base length, and
-    idle_window_seconds shortens an abort to fit a short time control
+    One idle window: what becomes of a game whose side to move has gone
+    silent, and how many seconds of silence are allowed first. Paired with a
+    ply count in IDLE_WINDOW_BY_PLIES, which names the outcome both the sweep
+    and the pushed countdown read. `seconds` is the window length: the
+    table's base length in IDLE_WINDOW_BY_PLIES, and the length already fitted
+    to the room's time control by idle_window_seconds in the spec a room
+    hands out for its current ply
     """
 
     outcome: str

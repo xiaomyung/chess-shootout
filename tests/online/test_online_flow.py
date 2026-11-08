@@ -8,9 +8,12 @@ gives up, so a tight poll would time out before a transient first attempt
 recovers."""
 import time
 
+import httpx
 import pytest
 
-from chessshootout.online.client import OnlineClient
+from chessshootout.online.client import ClientReason, OnlineClient
+from chessshootout.online.transport import ServerTransport
+from chessshootout.server.protocol import PROTOCOL_VERSION
 from tests.helpers import fake_uuid4
 from tests.online.online_helpers import wait_for
 
@@ -157,3 +160,40 @@ def test_a_resign_before_both_sides_moved_comes_back_aborted_to_both(server, pli
         assert result.payload["winner_color"] is None
     a.disconnect()
     b.disconnect()
+
+
+def test_an_opponent_whose_pairing_is_cancelled_before_it_connects_hears_the_search_ended(
+        server, monkeypatch):
+    """REGRESSION, over real sockets: Alice's cancel lands after Bob's
+    /matchmake paired them but before his game socket authenticated. The
+    server calls the pairing off and lets the room go, so Bob's socket is
+    refused -- and his client used to end the session without a word, leaving
+    the wait card counting. It now reports a lost search."""
+    base = f"http://127.0.0.1:{server}"
+    seat = httpx.post(f"{base}/matchmake", json={
+        "version": PROTOCOL_VERSION, "client_uuid": ALICE3, "nickname": "Alice",
+        "time_minutes": 7, "increment_seconds": 0, "side_preference": "white"}).json()
+    real_connect = ServerTransport.ws_connect
+    cancels = []
+
+    async def cancel_first(self, room_id, session_token):
+        async with httpx.AsyncClient() as http:
+            answer = await http.request("DELETE", f"{base}/matchmake", json={
+                "version": PROTOCOL_VERSION, "room_id": seat["room_id"],
+                "session_token": seat["session_token"]})
+        cancels.append(answer.json())
+        return await real_connect(self, room_id, session_token)
+
+    monkeypatch.setattr(ServerTransport, "ws_connect", cancel_first)
+    bob = OnlineClient()
+    bob.connect(f"localhost:{server}", {"nickname": "Bob", "client_uuid": BOB3,
+                                        "time_minutes": 7, "increment_seconds": 0,
+                                        "side_preference": "black"})
+    try:
+        error = wait_for(bob, "error")
+    finally:
+        bob.disconnect()
+
+    assert cancels == [{"status": "ok"}]
+    assert error is not None
+    assert error.payload == {"reason": ClientReason.SEARCH_LOST}
